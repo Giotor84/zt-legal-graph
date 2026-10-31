@@ -1,0 +1,320 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "unione_estrazioni.schema.json",
+  "title": "Unione delle due estrazioni (Fase 1 + spazzata) su un atto",
+  "description": "Il prodotto di `unisci_estrazioni.py`. NON e' un elenco di eccezioni: e' l'elenco di tutte le proposte dei due metodi, nessuna tolta, raggruppate per zona del testo. Una zona con piu' voci non e' un'eccezione con varianti - e' un punto su cui i due metodi non concordano su quante ne stiano leggendo.",
+  "type": "object",
+  "required": [
+    "meta",
+    "n_caratteri_testo_pulito",
+    "voci",
+    "non_ancorate",
+    "conteggi",
+    "cosa_non_dice"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versione_contratto",
+        "generato_il",
+        "sorgenti"
+      ],
+      "description": "La provenienza dell'unione. Le due sorgenti sono nominate qui perche' un'unione senza il nome di cio' che ha unito non e' rifacibile, e questo file e' il punto in cui due corse distinte diventano una sola.",
+      "properties": {
+        "versione_contratto": {
+          "const": "1.36"
+        },
+        "generato_il": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sorgenti": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "fase1",
+            "spazzata"
+          ],
+          "properties": {
+            "fase1": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spazzata": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "citabilita": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": false,
+          "required": [
+            "base_url",
+            "seed",
+            "temperature"
+          ],
+          "description": "null quando il giudizio di citabilita' non e' stato chiesto. Il campo esiste comunque, perche' un'uscita senza giudizi e un'uscita in cui tutti passano si scriverebbero altrimenti allo stesso modo.",
+          "properties": {
+            "base_url": {
+              "type": "string"
+            },
+            "seed": {
+              "type": "integer"
+            },
+            "temperature": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "n_caratteri_testo_pulito": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Lunghezza del testo su cui sono calcolati TUTTI gli offset: `segmenta_atto.pulisci_numeri_pagina(grezzo)`. E' l'unico sistema di coordinate ammesso, ed e' lo stesso per entrambi i metodi."
+    },
+    "voci": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/voce"
+      },
+      "description": "Ogni proposta dei due metodi, ancorata. Nessuna viene tolta, nemmeno quelle che il controllo di citabilita' segnala."
+    },
+    "non_ancorate": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/non_ancorata"
+      },
+      "description": "Le eccezioni che Fase 1 ha trovato ma non ha saputo collocare nel testo. Senza offset non possono entrare in nessuna zona, ma restano eccezioni trovate: escono qui invece di sparire."
+    },
+    "conteggi": {
+      "$ref": "#/$defs/conteggi"
+    },
+    "cosa_non_dice": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Il limite dell'uscita in chiaro, per chi legge il JSON senza aver letto il modulo."
+    }
+  },
+  "$defs": {
+    "voce": {
+      "type": "object",
+      "required": [
+        "trovata_da",
+        "testo",
+        "inizio",
+        "fine",
+        "zona",
+        "voci_nella_zona",
+        "famiglie_proposte"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "trovata_da": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "fase1",
+              "spazzata"
+            ]
+          },
+          "description": "Due elementi solo quando le due fette sono IDENTICHE carattere per carattere - l'unico caso di fusione che non richiede di inventare una soglia. Serve anche a accorgersi se un domani uno dei due metodi peggiora."
+        },
+        "testo": {
+          "type": "string"
+        },
+        "inizio": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fine": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "corrispondenza": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "esatta",
+            "normalizzata",
+            "fuzzy",
+            null
+          ],
+          "description": "Come `localizza.localizza` ha collocato la fetta. Regola 4: l'offset lo ha calcolato Python a monte, e qui non viene ne' ricalcolato ne' spostato."
+        },
+        "famiglia_probabile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "famiglie_proposte": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": "Una per metodo che ha proposto questa fetta. Su una voce fusa i due possono aver proposto famiglie diverse, e la divergenza non va nascosta scegliendone una."
+        },
+        "id_di_origine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zona": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Voci che si sovrappongono per contenimento >= 0.5. La soglia non e' un parametro da tarare: sulla distribuzione misurata (bimodale, 45 coppie su 54 a contenimento pieno) qualunque valore fra 0,50 e 0,90 da' lo stesso raggruppamento."
+        },
+        "voci_nella_zona": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "citabilita": {
+          "$ref": "#/$defs/citabilita"
+        }
+      }
+    },
+    "citabilita": {
+      "type": "object",
+      "required": [
+        "categoria",
+        "motivo",
+        "azione_del_controllo",
+        "da_rivedere"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "categoria": {
+          "enum": [
+            "sta_in_piedi_da_sola",
+            "frammento_sospeso",
+            "dipende_dal_contesto",
+            "troppo_corta_per_giudicare"
+          ]
+        },
+        "motivo": {
+          "type": "string"
+        },
+        "azione_del_controllo": {
+          "enum": [
+            "passa",
+            "segnala",
+            "blocca"
+          ],
+          "description": "Cio' che il controllo direbbe di fare. `blocca` viene DECLASSATO a segnalazione e resta scritto: su 58 fette giudicate a mano avrebbe salvato 4 scarti al prezzo di 3 frasi vere. Si toglie l'azione, non la misura."
+        },
+        "da_rivedere": {
+          "type": "boolean",
+          "description": "Vero per ogni categoria diversa da `sta_in_piedi_da_sola`. Nessuna voce viene tolta: in un atto difensivo un'eccezione persa costa piu' di una da scartare a mano."
+        }
+      }
+    },
+    "non_ancorata": {
+      "type": "object",
+      "required": [
+        "trovata_da",
+        "testo",
+        "stato_ancora"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "trovata_da": {
+          "const": "fase1"
+        },
+        "testo": {
+          "type": "string"
+        },
+        "stato_ancora": {
+          "enum": [
+            "ancora_ambigua",
+            "ancora_parziale",
+            "non_ancorata",
+            "assente"
+          ]
+        },
+        "famiglia_probabile": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id_di_origine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "conteggi": {
+      "type": "object",
+      "required": [
+        "voci",
+        "zone",
+        "zone_con_una_voce_sola",
+        "zone_con_piu_voci",
+        "per_provenienza",
+        "non_ancorate_di_fase1",
+        "da_rivedere"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "voci": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zone": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "zone_con_una_voce_sola": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Le ha viste un metodo solo. Misurato su cinque atti: circa tre quarti di queste sono eccezioni vere, quindi sono il materiale che scegliere un metodo solo farebbe perdere."
+        },
+        "zone_con_piu_voci": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "per_provenienza": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "propertyNames": {
+            "enum": [
+              "fase1",
+              "spazzata",
+              "fase1+spazzata"
+            ]
+          }
+        },
+        "non_ancorate_di_fase1": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "da_rivedere": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

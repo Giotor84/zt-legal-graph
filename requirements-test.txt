@@ -1,0 +1,9 @@
+# Dipendenze minime per la suite di test (CI): senza torch, sentence-transformers e modelli.
+# I test che richiedono il modello di embedding o il grafo costruito vengono saltati.
+jsonschema~=4.26
+networkx~=3.6
+numpy>=2.0
+pdfplumber>=0.11
+rapidfuzz>=3.9
+requests~=2.34
+pytest>=8

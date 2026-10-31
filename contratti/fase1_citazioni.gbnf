@@ -1,0 +1,36 @@
+# Fase 1, passata "citazioni" - equivalente GBNF di SCHEMA_CITAZIONI
+# (estrazione_atto.py). Le citazioni restano cosi' come scritte nell'atto,
+# non normalizzate - la normalizzazione e' compito di references.py a valle.
+# La passata di autoverifica (SCHEMA_AUTOVERIFICA) segue lo stesso identico
+# pattern: due liste di stringhe limitate - non ripetuta qui.
+#
+# v1.1 - le norme citate sono ora OGGETTI {testo, data_rilevante}:
+# data_rilevante e' la data del fatto/contratto/atto rispetto alla quale
+# la controparte invoca la norma, emessa SOLO se il testo la dichiara
+# esplicitamente ("null se l'atto non la indica" va anche nel prompt).
+# La grammatica impone solo la FORMA della data (YYYY-MM-DD oppure null):
+# la validita' di calendario ("2026-02-31", "2026-99-99" passano) e il
+# fatto che la data compaia davvero nel testo sono controlli Python /
+# revisione - una grammatica non puo' verificarli.
+
+root ::= "{" ws
+  "\"norme_citate\"" ws ":" ws norme ws "," ws
+  "\"precedenti_citati\"" ws ":" ws lista-str-150-max30 ws "," ws
+  "\"elementi_non_estraibili\"" ws ":" ws lista-str-150-max10 ws
+"}"
+
+norme ::= "[" ws "]" | "[" ws norma (ws "," ws norma){0,29} ws "]"
+
+norma ::= "{" ws
+  "\"testo\"" ws ":" ws str-150 ws "," ws
+  "\"data_rilevante\"" ws ":" ws data-o-null ws
+"}"
+
+data-o-null ::= "null" | "\"" [0-9]{4} "-" [0-9]{2} "-" [0-9]{2} "\""
+
+lista-str-150-max30 ::= "[" ws "]" | "[" ws str-150 (ws "," ws str-150){0,29} ws "]"
+lista-str-150-max10 ::= "[" ws "]" | "[" ws str-150 (ws "," ws str-150){0,9} ws "]"
+str-150 ::= "\"" char{1,150} "\""
+
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+ws ::= [ \t\n\r]{0,2}

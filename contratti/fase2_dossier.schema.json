@@ -1,0 +1,722 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fase2_dossier.schema.json",
+  "title": "Contratto Fase 2 -> Fase 3: dossier di confutazione con fonti verificate",
+  "description": "Prodotto INTERAMENTE da codice deterministico (motore_regole + risolvi_fonte + retrieval + taglio estratti): nessuna chiamata LLM emette questo file, quindi NON esiste una GBNF corrispondente - il vincolo e' il validatore jsonschema piu' i controlli Python (vedi CONTRATTI_DATI.md). E' l'UNICO ingresso della Fase 3: cio' che non sta in 'fonti'/'estratti' non e' citabile nell'atto, e cio' che non sta qui non raggiunge la Fase 3 in nessun altro modo - non esiste un secondo canale di ingresso (contratto 1.2: anche le conclusioni dell'avvocato passano di qui, vedi 'conclusioni_avvocato').",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "meta",
+    "obiettivo",
+    "fatti_di_causa",
+    "conclusioni_avvocato",
+    "fonti",
+    "estratti",
+    "esiti",
+    "fonti_scartate"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versione_contratto",
+        "generato_il",
+        "sha256_estrazione",
+        "query_di_ricerca",
+        "esecuzione"
+      ],
+      "properties": {
+        "versione_contratto": {
+          "const": "1.36"
+        },
+        "generato_il": {
+          "type": "string"
+        },
+        "sha256_estrazione": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "sha256 del file fase1_estrazione.json da cui questo dossier deriva - lega la catena, l'entry point lo ricontrolla."
+        },
+        "esecuzione": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Tutto cio' che serve a RIESEGUIRE identicamente questa corsa. Senza questi campi due esecuzioni non sono confrontabili e un golden set non misura niente: una differenza nell'output potrebbe venire dal modello, dal seed, dal contesto, dal corpus o dal codice, e non ci sarebbe modo di dirlo. Blocco identico nei tre schemi di file - la coerenza fra le copie e' verificata da validazione.py.",
+          "required": [
+            "avviata_il",
+            "cache_prompt",
+            "grafo",
+            "id_esecuzione",
+            "modello",
+            "motore_similarita",
+            "n_ctx",
+            "seed",
+            "server",
+            "sha256_atto_input",
+            "soglia_segmenti",
+            "temperature_per_passo",
+            "versione_contratti"
+          ],
+          "properties": {
+            "id_esecuzione": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Identificativo della corsa, IDENTICO nei tre file prodotti dalla stessa esecuzione - e' cio' che permette di legare 01/02/03 fra loro anche dopo che sono stati spostati in cartelle diverse."
+            },
+            "avviata_il": {
+              "type": "string",
+              "description": "Istante di avvio della CORSA (non di scrittura del singolo file): uguale nei tre file, a differenza di meta.generato_il."
+            },
+            "versione_contratti": {
+              "type": "string",
+              "description": "Versione dei contratti sotto cui la corsa e' stata eseguita."
+            },
+            "sha256_atto_input": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "sha256 del TESTO dell'atto su cui si e' lavorato (dopo l'estrazione dal PDF e la pulizia dei numeri di pagina: e' quello a cui gli offset si riferiscono), non del PDF. null nelle corse che ripartono da un file intermedio senza l'atto originale."
+            },
+            "modello": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "description": "null nei file prodotti senza alcuna chiamata LLM (il dossier di Fase 2, che e' solo Python).",
+              "required": [
+                "nome_file",
+                "sha256"
+              ],
+              "properties": {
+                "nome_file": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "sha256 del GGUF. Calcolato una volta e messo in cache in un file .sha256 accanto al modello: su un file da 5 GB ricalcolarlo a ogni corsa costerebbe minuti per un dato che cambia solo quando si cambia modello. null se il file non e' raggiungibile da questa macchina (es. server remoto)."
+                }
+              }
+            },
+            "motore_similarita": {
+              "type": "string",
+              "enum": [
+                "rapidfuzz",
+                "difflib"
+              ],
+              "description": "Quale implementazione ha calcolato i rapporti di similarita' in localizza.py per QUESTA corsa - 'rapidfuzz' se il pacchetto e' installato, altrimenti il fallback 'difflib' (SequenceMatcher, autojunk=False). Le soglie 0.95/0.80 del contratto sono valori assoluti tarati su numeri prodotti da un motore specifico: senza questo campo, un ancoraggio non e' riproducibile ne' confrontabile fra macchine con dipendenze diverse. Vedi test_motori_di_similarita_concordano_su_citazioni_reali per la tolleranza misurata fra i due."
+            },
+            "server": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Parametri del SERVER llama-server in ascolto per questa corsa, non solo del modello che ospita - dalla 1.12, dopo una non-riproducibilita' di Fase 1 misurata su seed nominalmente identico (causa reale: il seed non arrivava al modello, vedi 'seed' - ma la configurazione del server e' un fattore di riproducibilita' a se', e null finche' non veniva letta da /props non lo dimostrava innocente, lo dava per scontato).",
+              "required": [
+                "total_slots",
+                "build_info"
+              ],
+              "properties": {
+                "total_slots": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Numero di slot paralleli del server (-np). La configurazione di riferimento (DEPLOY.md) e' 1: su macchina mono-utente il determinismo vale piu' del throughput. null se /props non era raggiungibile."
+                },
+                "build_info": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Build e commit di llama-server (es. 'b10488-9d77fa172'), da /props. null se /props non era raggiungibile."
+                }
+              }
+            },
+            "cache_prompt": {
+              "type": "boolean",
+              "const": false,
+              "description": "Dalla 1.17: false su OGNI chiamata (llama_server_client.completa), non una scelta per-corsa. Misurato dal vivo che il default true del server e' la causa di un residuo di stato fra richieste sullo stesso processo - stesso prompt, stesso seed, tre chiamate di fila NON davano lo stesso risultato; con cache_prompt esplicito a false, identiche byte per byte. Registrato qui perche' e' esattamente il tipo di parametro la cui assenza renderebbe una corsa non riproducibile con certezza - vedi DEPLOY.md."
+            },
+            "n_ctx": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "description": "Contesto REALE del server, letto da /props - non la costante scritta nello script di avvio, che potrebbe non corrispondere all'istanza effettivamente in ascolto."
+            },
+            "seed": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Seed passato a ogni chiamata. Senza un seed fissato due corse non sono riproducibili nemmeno a parita' di tutto il resto - percio' l'entry point ne impone sempre uno e lo registra qui."
+            },
+            "temperature_per_passo": {
+              "type": "object",
+              "description": "Temperatura per ciascun passo che ha chiamato il modello. Non un valore unico: l'estrazione asettica di Fase 1 gira a 0.1, la redazione a 0.7, la coerenza a 0.3 - riassumerli in un numero solo renderebbe il campo inutile alla riproduzione.",
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "grafo": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "description": "Identita' del corpus usato. null quando la corsa non ha toccato il grafo (Fase 1 da sola, modalita' batch del golden set).",
+              "required": [
+                "percorso",
+                "sha256",
+                "n_nodi"
+              ],
+              "properties": {
+                "percorso": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "n_nodi": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            },
+            "soglia_segmenti": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Soglia di rilevanza assoluta applicata all'indice dei segmenti in QUESTA corsa. Parametro, non costante: configurabile da --soglia-segmenti. Registrata qui perche' due corse con soglie diverse producono dossier diversi a parita' di tutto il resto, e senza questo campo la differenza sarebbe inspiegabile. null nelle corse che non hanno interrogato l'indice segmenti (Fase 1 da sola)."
+            }
+          }
+        },
+        "query_di_ricerca": {
+          "type": "object",
+          "description": "Le query di ricerca usate dal retrieval, UNA PER ECCEZIONE (contratto 1.3). Chiave = eccezione_id. Registrate perche' un dossier va riprodotto a distanza di mesi: senza l'ingresso E l'uscita della riformulazione non si puo' distinguere un retrieval diverso dovuto al corpus cambiato da uno dovuto a una query diversa. Prodotte dal passo 1-bis dell'orchestratore (chiamate LLM) e passate alla Fase 2 come DATO: la Fase 2 resta 'solo Python, zero LLM'. Un'eccezione per cui non e' stato fatto retrieval (esito non confutabile, o fonti di regola gia' sufficienti) puo' non comparire nella mappa.",
+          "propertyNames": {
+            "pattern": "^X[0-9]{2}$"
+          },
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "originale",
+              "riformulata"
+            ],
+            "properties": {
+              "originale": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Il testo da cui si e' riformulato: testo_letterale dell'eccezione piu' la descrizione della famiglia assegnata."
+              },
+              "riformulata": {
+                "type": "string",
+                "minLength": 1,
+                "description": "La query effettivamente passata all'indice semantico per QUESTA eccezione."
+              }
+            }
+          }
+        }
+      }
+    },
+    "obiettivo": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fatti_di_causa": {
+      "type": "string",
+      "minLength": 1
+    },
+    "conclusioni_avvocato": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Le richieste al giudice, testo fornito dall'avvocato (argomento obbligatorio della riga di comando dell'entry point) e trasportato qui dalla Fase 2. Finisce tale e quale in fase3_atto.json/conclusioni con origine='avvocato'. NON e' generato dal modello, mai: le conclusioni sono formule processuali, non affermazioni di diritto da argomentare. Passa dal dossier e non da un parametro a parte perche' la Fase 3 ha UN SOLO ingresso - obiettivo e fatti_di_causa arrivano gia' per questa via, un secondo canale renderebbe falsa la promessa che tutto cio' che la Fase 3 vede sta in questo file. Oggi non esiste alcun template di conclusioni nel progetto: vedi la nota su 'origine' in fase3_atto.schema.json."
+    },
+    "fonti": {
+      "description": "Registro CHIUSO delle fonti citabili. Convenzione riservata: F00 = fatti_di_causa (il testo fornito dall'avvocato), F01 = atto di controparte; da F02 in poi nodi del grafo. Cosi' anche i paragrafi in FATTO hanno un'ancora risolvibile, non solo quelli in diritto. UNICO percorso d'ingresso per le fonti proposte dal catalogo di motore_regole: risolvi_fonte - mai una scrittura diretta motore->registro (vedi controllo di conservazione in CONTRATTI_DATI.md: |proposte dalla regola| = |qui, risolte| + |in fonti_scartate|).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fonte_id",
+          "tipo",
+          "node_id",
+          "citazione_breve",
+          "provenienza",
+          "verificata",
+          "data_vigenza",
+          "data_criterio_risoluzione"
+        ],
+        "properties": {
+          "fonte_id": {
+            "type": "string",
+            "pattern": "^F[0-9]{2}$"
+          },
+          "tipo": {
+            "enum": [
+              "fatti_di_causa",
+              "atto_controparte",
+              "articolo",
+              "massima",
+              "bankit_disposizione",
+              "provvedimento"
+            ]
+          },
+          "node_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "node_id nel grafo; null SOLO per F00/F01 - imposto anche dall'allOf qui sotto, non solo dalla descrizione"
+          },
+          "citazione_breve": {
+            "type": "string",
+            "description": "SOLO per il rendering finale - mai usata come chiave: l'identita' e' fonte_id/node_id (citazione_breve puo' collidere tra due massime stesso ufficio/tipo/data)"
+          },
+          "provenienza": {
+            "enum": [
+              "regola",
+              "retrieval_per_eccezione",
+              "retrieval_segmenti",
+              "input"
+            ],
+            "description": "Come la fonte e' entrata nel registro. 'regola' = proposta dal catalogo di motore_regole e risolta da risolvi_fonte; 'retrieval_per_eccezione' = indice principale, sulla query riformulata di QUELLA eccezione; 'retrieval_segmenti' = indice dei segmenti di provvedimento, sopra la soglia di rilevanza (contratto 1.5); 'input' = F00/F01, i testi forniti dall'avvocato. I due retrieval hanno QUOTE SEPARATE e non vengono mai ordinati insieme: alla calibrazione del 2026-08-20 la mediana del rumore dell'indice principale (0.8804) e' risultata piu' alta del minimo del segnale sui segmenti (0.8547), quindi un ordinamento unico metterebbe sistematicamente il rumore dell'uno sopra il segnale dell'altro."
+          },
+          "verificata": {
+            "const": true,
+            "description": "Per costruzione: una fonte non risolta nel grafo NON puo' comparire qui - finisce in fonti_scartate. Il const rende il file non valido se qualcuno prova ad aggirarlo."
+          },
+          "data_vigenza": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "Data di vigenza della VERSIONE della fonte risolta nel grafo. null finche' il grafo e' mono-versione (contratto 1.2); alla migrazione al grafo versionato diventa obbligatoria (non-null) per le fonti di tipo grafo - bump a contratto 2.0, i file 1.2 restano leggibili perche' il campo esiste gia'."
+          },
+          "data_criterio_risoluzione": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "La data USATA come criterio per scegliere la versione ('testo vigente al...'). null finche' il grafo e' mono-versione. Catena di risoluzione dichiarata (contratto 2.0): 1) data_rilevante della citazione di Fase 1 se presente, 2) data dei fatti fornita dall'avvocato, 3) data odierna - quale gradino e' scattato va detto nella memoria di analisi, mai applicato in silenzio."
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "tipo": {
+                  "enum": [
+                    "fatti_di_causa",
+                    "atto_controparte"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "node_id": {
+                  "const": null
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "tipo": {
+                  "enum": [
+                    "articolo",
+                    "massima",
+                    "bankit_disposizione",
+                    "provvedimento"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "node_id": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "estratti": {
+      "description": "Ritagli testuali dalle fonti, tagliati da Python (mai dal modello). La Fase 3 cita SOLO estratto_id: la tripla (fonte_id, inizio, fine) promessa dal contratto finale viene risolta da qui, deterministicamente.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "estratto_id",
+          "fine",
+          "fonte_id",
+          "inizio",
+          "parziale",
+          "testo"
+        ],
+        "properties": {
+          "estratto_id": {
+            "type": "string",
+            "pattern": "^F[0-9]{2}E[0-9]{2}$"
+          },
+          "fonte_id": {
+            "type": "string",
+            "pattern": "^F[0-9]{2}$"
+          },
+          "inizio": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "offset nel testo del nodo (campo testo/motivazione/dispositivo) o, per F00/F01, nel testo di fatti_di_causa/atto"
+          },
+          "fine": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "testo": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000,
+            "description": "DEVE essere identico a testo_fonte[inizio:fine] - controllo Python, non esprimibile in JSON Schema"
+          },
+          "parziale": {
+            "type": "boolean",
+            "description": "true = MATERIALE DI PROMPT, non ancora citabile (contratto 1.5). L'estratto viene mostrato alla Fase 3 come contesto ma NON puo' essere ancora di nessuna affermazione: controllo Python n. 16. Vale per l'estratto su F01 di un'eccezione la cui ancora e' 'ancora_parziale' - il ritaglio della migliore finestra di match. Senza di esso la Fase 3 argomenterebbe quel motivo senza avere davanti le parole della controparte; con esso le vede, ma non puo' spacciarle per testo verificato. E' la distinzione fra 'cosa il modello puo' leggere' e 'cosa il contratto garantisce come letterale'."
+          }
+        }
+      }
+    },
+    "esiti": {
+      "description": "Un esito per ogni MOTIVO, non per ogni eccezione (contratto 1.7). Gli esiti con stessa famiglia e stesso insieme di fonti a supporto sono accorpati: vedi 'eccezioni_accorpate'. L'ordine e' quello di prima apparizione dei rappresentanti. Nessuna eccezione della Fase 1 puo' sparire ne' comparire due volte - controllo Python n. 5.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "consolidamento",
+          "contro_argomento",
+          "dal_grafo",
+          "eccezione_id",
+          "eccezioni_accorpate",
+          "estratti_citabili",
+          "famiglia",
+          "motivo_astensione",
+          "motivo_errore",
+          "nota",
+          "stato"
+        ],
+        "properties": {
+          "eccezione_id": {
+            "type": "string",
+            "pattern": "^X[0-9]{2}$",
+            "description": "Rappresentante dell'esito: il primo eccezione_id in ordine di apparizione fra quelli accorpati. Da' il prefisso ai paragrafo_id di Fase 3. L'elenco completo e' in 'eccezioni_accorpate' - usare QUELLO per ogni ragionamento sulla copertura."
+          },
+          "famiglia": {
+            "enum": [
+              "incompletezza_estratti_conto",
+              "saldaconto_art_50_tub",
+              "legittimazione_cessionario",
+              "anomalie_contabili",
+              "vizi_fideiussione",
+              "qualificazione_consumatore",
+              "prescrizione",
+              "documentazione_art_119_tub",
+              "recesso_apertura_credito_senza_preavviso",
+              "competenza_e_rito",
+              "mediazione_procedibilita",
+              "contestazione_ctu",
+              "forma_scritta_art_117_tub",
+              "taeg_isc_indeterminatezza",
+              "ammortamento_alla_francese",
+              "garanzia_ipotecaria",
+              "cambiale_titolo_esecutivo",
+              "segnalazione_centrale_rischi",
+              "decadenza_beneficio_termine",
+              "leasing",
+              null
+            ]
+          },
+          "stato": {
+            "enum": [
+              "confutabile",
+              "eccezione_fondata",
+              "astensione",
+              "non_classificata",
+              "errore_tecnico"
+            ],
+            "description": "confutabile = regola applicata E almeno un estratto citabile verificato; eccezione_fondata = il motore dice che l'eccezione avversaria regge (non si confuta con fonti deboli); astensione = regola applicata ma NESSUNA fonte principale verificata nel grafo, oppure famiglia riconosciuta ma non coperta dal motore; non_classificata = euristica keyword senza riscontro; errore_tecnico = il sistema si e' guastato elaborando questo esito (eccezione non gestita, indice semantico non disponibile, grafo irraggiungibile). ASTENSIONE E ERRORE_TECNICO NON VANNO MAI COLLASSATI: l'astensione e' il sistema che ha funzionato correttamente e ha rifiutato di argomentare senza ancoraggio, l'errore tecnico e' il sistema rotto. Confonderli rende impossibile misurare l'uno senza contaminare l'altro, e fa sembrare prudenza quello che e' un guasto. La stessa regola vale per qualunque altro fallimento tecnico: mai riciclare 'astensione' come contenitore di errori."
+          },
+          "contro_argomento": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "consolidamento": {
+            "enum": [
+              "pacifico",
+              "contrastato",
+              "minoritario",
+              null
+            ]
+          },
+          "nota": {
+            "type": "string",
+            "description": "sempre presente - la spiegazione della precondizione che ha determinato l'esito (da motore_regole)"
+          },
+          "estratti_citabili": {
+            "type": "array",
+            "description": "Gli UNICI estratti che la chiamata LLM di Fase 3 per questa eccezione potra' ancorare - l'enum della grammatica viene generato dagli 'estratto_id' di questa lista. Dalla 1.2 sono OGGETTI, non stringhe: la provenienza di un estratto determina COME puo' essere usato (vedi 'provenienza' qui sotto e il controllo Python n. 14), e appiattirla sul solo id rendeva la restrizione inesprimibile. L'unicita' e' sull'estratto_id, non sull'oggetto intero - controllo Python (uniqueItems su oggetti non lo garantirebbe: due voci con lo stesso id e provenienza diversa sarebbero 'uniche').",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "estratto_id",
+                "provenienza"
+              ],
+              "properties": {
+                "estratto_id": {
+                  "type": "string",
+                  "pattern": "^F[0-9]{2}E[0-9]{2}$"
+                },
+                "provenienza": {
+                  "enum": [
+                    "regola",
+                    "retrieval_per_eccezione",
+                    "retrieval_segmenti",
+                    "atto_controparte",
+                    "atto_controparte_parziale"
+                  ],
+                  "description": "'regola' = fonte proposta dal catalogo per QUESTA eccezione e risolta nel grafo; 'retrieval_per_eccezione' = indice principale sulla query riformulata di questa eccezione; 'retrieval_segmenti' = segmento di provvedimento sopra soglia; 'atto_controparte' = l'estratto su F01 col testo letterale dell'eccezione, ancora ANCORATA; 'atto_controparte_parziale' = idem ma da un'ancora 'ancora_parziale' - MATERIALE DI PROMPT, l'estratto ha parziale=true e il controllo 16 ne vieta l'uso come ancora. Gli estratti su atto_controparte (entrambe le forme) entrano SEMPRE quando esistono e NON contano nel tetto di 6: i 6 sono le fonti a supporto, F01 e' l'oggetto dell'attacco. Nessuna delle due forme e' mai autorita' (controllo 14)."
+                }
+              }
+            }
+          },
+          "motivo_astensione": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Perche' il sistema, funzionando correttamente, ha scelto di non argomentare. Mai usato per riferire un guasto: per quello c'e' motivo_errore."
+          },
+          "motivo_errore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cosa si e' rotto, in modo utilizzabile da chi deve ripararlo o rilanciare (quale passo, quale eccezione, quale budget). Presente se e solo se stato = errore_tecnico."
+          },
+          "eccezioni_accorpate": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^X[0-9]{2}$"
+            },
+            "description": "TUTTI gli eccezione_id che questo esito copre, incluso quello in 'eccezione_id' (che ne e' il rappresentante, il primo in ordine di apparizione, e da' il prefisso ai paragrafo_id). Piu' di uno quando due eccezioni hanno la STESSA famiglia e lo STESSO insieme di fonti a supporto: giuridicamente sono lo stesso motivo, e un avvocato le tratta insieme. Il confronto e' su insieme IDENTICO, mai simile - fonti diverse fanno motivi diversi anche a parita' di famiglia, perche' l'argomento che si puo' costruire dipende da cosa si puo' citare. Gli estratti su F01 NON entrano nel confronto (ognuno riporta il testo della PROPRIA eccezione, quindi differiscono sempre) ma confluiscono tutti nell'esito accorpato: il motivo unico riferisce entrambe le affermazioni della controparte. Il controllo Python n. 5 verifica su questo campo, non su 'eccezione_id': l'unione degli eccezioni_accorpate di tutti gli esiti deve coincidere con le eccezioni di Fase 1, ognuna una e una sola volta."
+          },
+          "dal_grafo": {
+            "description": "1.28: la classificazione RICAVATA dal corpus, non da una tabella. `comunita` e' la comunita' di co-citazione fra articoli misurata sui provvedimenti (src/famiglie_da_cocitazione.py): due articoli che i giudici citano nella stessa motivazione stanno nello stesso discorso giuridico. `rango` e' l'alberatura degli articoli agganciati - il codice di rito e' rito, il capo della prescrizione e' preliminare di merito, il resto e' merito - ed e' cio' che decide l'ordine dei motivi nella bozza. Convive con `famiglia`, che resta la chiave del motore delle regole: sono due domande diverse. 1.29: `fiducia` dice quanto quella comunita' e' sostenuta, e non e' mai una scelta silenziosa.",
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "comunita",
+              "rango",
+              "articoli",
+              "disaccordi",
+              "fiducia"
+            ],
+            "properties": {
+              "comunita": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "description": "null se nessuno strato ha collocato l'eccezione, oppure se due comunita' pesano uguale: un'eccezione a cavallo di due discorsi e' un'informazione, non un pareggio da sciogliere."
+              },
+              "rango": {
+                "enum": [
+                  "rito",
+                  "preliminare_di_merito",
+                  "merito",
+                  "non_classificato"
+                ]
+              },
+              "articoli": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Gli articoli del grafo a cui l'eccezione si aggancia, in forma codice::numero."
+              },
+              "disaccordi": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "description": "Strati che indicano comunita' diverse, o citazioni senza codice esplicito non univoche sul grafo. Dichiarati, mai risolti in silenzio."
+              },
+              "fiducia": {
+                "enum": [
+                  "concordi",
+                  "uno_solo",
+                  "discordi",
+                  "nessuno"
+                ],
+                "description": "1.29: lo stato del voto fra i due strati DEBOLI della classificazione - il lessico del corpus e i segmenti di motivazione piu' vicini. Misurato sul golden set (965 eccezioni): il lessico da solo ha precisione 0,523, i vettori con quorum 0,646, ma dove CONCORDANO la precisione e' 0,804 e dove discordano crollano entrambi (0,224 e 0,418). Il disaccordo non e' un pareggio da sciogliere: e' l'informazione che quell'eccezione va letta a mano, e la Fase 3 deve poterla vedere. 'uno_solo' quando ha parlato un solo strato (in Fase 1 e' sempre cosi': l'indice dei segmenti non c'e'), 'nessuno' quando non ha parlato nessuno. Su 'discordi' `comunita` e' null SE poggiava su quel voto: una norma citata dall'eccezione o gli articoli del vicinato non erano nel voto e non si annullano per un voto a cui non hanno partecipato."
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "stato": {
+                  "const": "confutabile"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "estratti_citabili": {
+                  "minItems": 1
+                },
+                "motivo_astensione": {
+                  "const": null
+                },
+                "motivo_errore": {
+                  "const": null
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stato": {
+                  "enum": [
+                    "astensione",
+                    "non_classificata"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "estratti_citabili": {
+                  "maxItems": 0
+                },
+                "motivo_astensione": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "motivo_errore": {
+                  "const": null
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stato": {
+                  "const": "eccezione_fondata"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "estratti_citabili": {
+                  "maxItems": 0
+                },
+                "motivo_errore": {
+                  "const": null
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "stato": {
+                  "const": "errore_tecnico"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "estratti_citabili": {
+                  "maxItems": 0
+                },
+                "motivo_astensione": {
+                  "const": null
+                },
+                "motivo_errore": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "fonti_scartate": {
+      "description": "Fonti raccomandate dal motore delle regole ma NON risolte nel grafo: l'astensione resa esplicita e tracciabile. Restano visibili qui e nella memoria di analisi (da verificare a mano), MAI citabili in Fase 3. Vincolo di conservazione (controllo Python): OGNI Fonte proposta da un RisultatoRegola compare o in 'fonti' (passata da risolvi_fonte) o qui - nessuna terza via, nessuna sparizione.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "citazione_breve",
+          "ruolo",
+          "eccezione_id",
+          "motivo"
+        ],
+        "properties": {
+          "citazione_breve": {
+            "type": "string"
+          },
+          "ruolo": {
+            "type": "string"
+          },
+          "eccezione_id": {
+            "type": "string",
+            "pattern": "^X[0-9]{2}$"
+          },
+          "motivo": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,925 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fase1_estrazione.schema.json",
+  "title": "Contratto Fase 1 -> Fase 2: estrazione strutturata dell'atto avversario",
+  "description": "File scritto dall'orchestratore di Fase 1. I campi marcati [LLM] provengono dalle passate vincolate (vedi fase1_*.gbnf); tutti gli altri sono calcolati in Python (id, ancoraggi, aggregazioni). Il modello NON emette mai offset: 'ancora' e' calcolata da Python cercando testo_letterale nel testo dell'atto. Validare con jsonschema PRIMA di passare il file alla Fase 2.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "meta",
+    "atto",
+    "struttura",
+    "eccezioni",
+    "documenti",
+    "domande_riconvenzionali",
+    "citazioni_controparte",
+    "autoverifica",
+    "unita_scartate",
+    "buchi"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versione_contratto",
+        "generato_il",
+        "modello",
+        "esecuzione"
+      ],
+      "properties": {
+        "versione_contratto": {
+          "const": "1.36"
+        },
+        "generato_il": {
+          "type": "string"
+        },
+        "modello": {
+          "type": "string"
+        },
+        "esecuzione": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Tutto cio' che serve a RIESEGUIRE identicamente questa corsa. Senza questi campi due esecuzioni non sono confrontabili e un golden set non misura niente: una differenza nell'output potrebbe venire dal modello, dal seed, dal contesto, dal corpus o dal codice, e non ci sarebbe modo di dirlo. Blocco identico nei tre schemi di file - la coerenza fra le copie e' verificata da validazione.py.",
+          "required": [
+            "avviata_il",
+            "cache_prompt",
+            "grafo",
+            "id_esecuzione",
+            "modello",
+            "motore_similarita",
+            "n_ctx",
+            "seed",
+            "server",
+            "sha256_atto_input",
+            "soglia_segmenti",
+            "temperature_per_passo",
+            "versione_contratti"
+          ],
+          "properties": {
+            "id_esecuzione": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Identificativo della corsa, IDENTICO nei tre file prodotti dalla stessa esecuzione - e' cio' che permette di legare 01/02/03 fra loro anche dopo che sono stati spostati in cartelle diverse."
+            },
+            "avviata_il": {
+              "type": "string",
+              "description": "Istante di avvio della CORSA (non di scrittura del singolo file): uguale nei tre file, a differenza di meta.generato_il."
+            },
+            "versione_contratti": {
+              "type": "string",
+              "description": "Versione dei contratti sotto cui la corsa e' stata eseguita."
+            },
+            "sha256_atto_input": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "sha256 del TESTO dell'atto su cui si e' lavorato (dopo l'estrazione dal PDF e la pulizia dei numeri di pagina: e' quello a cui gli offset si riferiscono), non del PDF. null nelle corse che ripartono da un file intermedio senza l'atto originale."
+            },
+            "modello": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "description": "null nei file prodotti senza alcuna chiamata LLM (il dossier di Fase 2, che e' solo Python).",
+              "required": [
+                "nome_file",
+                "sha256"
+              ],
+              "properties": {
+                "nome_file": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "sha256 del GGUF. Calcolato una volta e messo in cache in un file .sha256 accanto al modello: su un file da 5 GB ricalcolarlo a ogni corsa costerebbe minuti per un dato che cambia solo quando si cambia modello. null se il file non e' raggiungibile da questa macchina (es. server remoto)."
+                }
+              }
+            },
+            "motore_similarita": {
+              "type": "string",
+              "enum": [
+                "rapidfuzz",
+                "difflib"
+              ],
+              "description": "Quale implementazione ha calcolato i rapporti di similarita' in localizza.py per QUESTA corsa - 'rapidfuzz' se il pacchetto e' installato, altrimenti il fallback 'difflib' (SequenceMatcher, autojunk=False). Le soglie 0.95/0.80 del contratto sono valori assoluti tarati su numeri prodotti da un motore specifico: senza questo campo, un ancoraggio non e' riproducibile ne' confrontabile fra macchine con dipendenze diverse. Vedi test_motori_di_similarita_concordano_su_citazioni_reali per la tolleranza misurata fra i due."
+            },
+            "server": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Parametri del SERVER llama-server in ascolto per questa corsa, non solo del modello che ospita - dalla 1.12, dopo una non-riproducibilita' di Fase 1 misurata su seed nominalmente identico (causa reale: il seed non arrivava al modello, vedi 'seed' - ma la configurazione del server e' un fattore di riproducibilita' a se', e null finche' non veniva letta da /props non lo dimostrava innocente, lo dava per scontato).",
+              "required": [
+                "total_slots",
+                "build_info"
+              ],
+              "properties": {
+                "total_slots": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Numero di slot paralleli del server (-np). La configurazione di riferimento (DEPLOY.md) e' 1: su macchina mono-utente il determinismo vale piu' del throughput. null se /props non era raggiungibile."
+                },
+                "build_info": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Build e commit di llama-server (es. 'b10488-9d77fa172'), da /props. null se /props non era raggiungibile."
+                }
+              }
+            },
+            "cache_prompt": {
+              "type": "boolean",
+              "const": false,
+              "description": "Dalla 1.17: false su OGNI chiamata (llama_server_client.completa), non una scelta per-corsa. Misurato dal vivo che il default true del server e' la causa di un residuo di stato fra richieste sullo stesso processo - stesso prompt, stesso seed, tre chiamate di fila NON davano lo stesso risultato; con cache_prompt esplicito a false, identiche byte per byte. Registrato qui perche' e' esattamente il tipo di parametro la cui assenza renderebbe una corsa non riproducibile con certezza - vedi DEPLOY.md."
+            },
+            "n_ctx": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "description": "Contesto REALE del server, letto da /props - non la costante scritta nello script di avvio, che potrebbe non corrispondere all'istanza effettivamente in ascolto."
+            },
+            "seed": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Seed passato a ogni chiamata. Senza un seed fissato due corse non sono riproducibili nemmeno a parita' di tutto il resto - percio' l'entry point ne impone sempre uno e lo registra qui."
+            },
+            "temperature_per_passo": {
+              "type": "object",
+              "description": "Temperatura per ciascun passo che ha chiamato il modello. Non un valore unico: l'estrazione asettica di Fase 1 gira a 0.1, la redazione a 0.7, la coerenza a 0.3 - riassumerli in un numero solo renderebbe il campo inutile alla riproduzione.",
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "grafo": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "description": "Identita' del corpus usato. null quando la corsa non ha toccato il grafo (Fase 1 da sola, modalita' batch del golden set).",
+              "required": [
+                "percorso",
+                "sha256",
+                "n_nodi"
+              ],
+              "properties": {
+                "percorso": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "n_nodi": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            },
+            "soglia_segmenti": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Soglia di rilevanza assoluta applicata all'indice dei segmenti in QUESTA corsa. Parametro, non costante: configurabile da --soglia-segmenti. Registrata qui perche' due corse con soglie diverse producono dossier diversi a parita' di tutto il resto, e senza questo campo la differenza sarebbe inspiegabile. null nelle corse che non hanno interrogato l'indice segmenti (Fase 1 da sola)."
+            }
+          }
+        }
+      }
+    },
+    "atto": {
+      "description": "Il testo sorgente e la sua segmentazione - la base di ogni offset citato altrove nel file.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "percorso_origine",
+        "sha256_testo",
+        "n_caratteri",
+        "blocchi"
+      ],
+      "properties": {
+        "percorso_origine": {
+          "type": "string"
+        },
+        "sha256_testo": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "n_caratteri": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "blocchi": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "blocco_id",
+              "inizio",
+              "fine"
+            ],
+            "properties": {
+              "blocco_id": {
+                "type": "string",
+                "pattern": "^B[0-9]{2}$"
+              },
+              "inizio": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "fine": {
+                "type": "integer",
+                "exclusiveMinimum": 0
+              }
+            }
+          }
+        }
+      }
+    },
+    "struttura": {
+      "description": "[LLM] Passata 'struttura' (solo primo blocco). null se la passata e' fallita (RispostaTroncata) - il fallimento e' dichiarato in 'buchi', mai silenzioso.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "creditore_e_cessionario",
+        "durata_apertura_credito",
+        "fase_processuale",
+        "grado",
+        "natura_rapporto",
+        "natura_rapporto_calcolata",
+        "qualita_parti",
+        "tipo_atto"
+      ],
+      "properties": {
+        "tipo_atto": {
+          "description": "Che atto e'. 1.26: aggiunti `atto_appello` e `ricorso_cassazione` - nel corpus del 2026-08-30 dodici atti su 56 sono appelli o ricorsi per cassazione e senza questi valori finivano per forza in uno sbagliato, che poi instrada la famiglia in Fase 2. Dal 1.26 NON e' piu' prodotto dal modello: lo calcola `tipo_atto.py` da tre strati deterministici (norma risolta sul grafo, giudice adito, autodenominazione dell'atto). Quando due strati discordano il valore e' `non_desumibile`: un disaccordo dichiarato e' un dato, una scelta silenziosa e' un errore che si propaga.",
+          "enum": [
+            "opposizione_decreto_ingiuntivo",
+            "opposizione_esecuzione",
+            "comparsa_risposta",
+            "memoria",
+            "atto_appello",
+            "ricorso_cassazione",
+            "non_desumibile"
+          ]
+        },
+        "fase_processuale": {
+          "enum": [
+            "monitoria",
+            "opposizione_cognizione",
+            "esecutiva",
+            "non_desumibile"
+          ]
+        },
+        "natura_rapporto": {
+          "enum": [
+            "conto_corrente",
+            "apertura_credito_cc",
+            "mutuo",
+            "finanziamento_rateale",
+            "altro",
+            "non_desumibile"
+          ]
+        },
+        "durata_apertura_credito": {
+          "enum": [
+            "tempo_determinato",
+            "tempo_indeterminato",
+            "non_desumibile",
+            "non_applicabile"
+          ]
+        },
+        "qualita_parti": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "debitore_principale",
+            "fideiussore_presente",
+            "qualita_fideiussore",
+            "consumatore_eccepito"
+          ],
+          "properties": {
+            "debitore_principale": {
+              "enum": [
+                "persona_fisica",
+                "societa",
+                "non_desumibile"
+              ]
+            },
+            "fideiussore_presente": {
+              "type": "boolean"
+            },
+            "qualita_fideiussore": {
+              "enum": [
+                "socio",
+                "amministratore",
+                "terzo_estraneo",
+                "consumatore",
+                "non_desumibile",
+                "non_applicabile"
+              ]
+            },
+            "consumatore_eccepito": {
+              "type": "boolean"
+            }
+          }
+        },
+        "creditore_e_cessionario": {
+          "type": "boolean"
+        },
+        "grado": {
+          "description": "1.26. Grado del giudizio in cui l'atto e' depositato, calcolato in Python dal giudice adito nell'intestazione (51 atti su 52 nel corpus misurato). Distinto da `fase_processuale`, che dice in quale fase del procedimento si sta (monitoria/cognizione/esecutiva) e non in quale grado: una comparsa conclusionale in opposizione a decreto ingiuntivo e' `primo_grado` ma `opposizione_cognizione`.",
+          "enum": [
+            "primo_grado",
+            "appello",
+            "legittimita",
+            "non_desumibile"
+          ]
+        },
+        "tipo_atto_calcolato": {
+          "description": "1.26. Come `tipo_atto` e `grado` sono stati ricavati: cosa ha detto ciascuno strato deterministico, quali disaccordi sono stati dichiarati, e cosa aveva risposto il modello prima che il campo gli fosse tolto. Serve a diagnosticare un `non_desumibile` e a misurare il disaccordo fra calcolo e modello invece di perderlo: senza, un valore sbagliato non si distingue da uno giusto.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "strati",
+            "disaccordi",
+            "detto_dal_modello"
+          ],
+          "properties": {
+            "strati": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "tipo_da_norma": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "grado_da_giudice": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "tipo_da_autodenominazione": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "norme_viste_in_testa": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "maxItems": 20
+                }
+              }
+            },
+            "disaccordi": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "maxItems": 10
+            },
+            "detto_dal_modello": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "natura_rapporto_calcolata": {
+          "description": "1.28: da dove viene `natura_rapporto`, che non e' piu' chiesta al modello. `da_norme` = dagli articoli che l'atto cita, esclusi quelli che il grafo colloca in una comunita' di co-citazione (quelli sono campi di battaglia, non descrizioni del rapporto: l'art. 1815 c.c. sta nel capo 'Del mutuo' ma il corpus lo usa per l'usura). `da_nomi` = dal nome che il codice civile da' all'istituto, cercato nel testo. Se i due discordano il campo vale `non_desumibile` e il disaccordo e' scritto qui: mai una scelta silenziosa.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "da_norme",
+            "da_nomi",
+            "istituti_visti",
+            "disaccordi",
+            "detto_dal_modello"
+          ],
+          "properties": {
+            "da_norme": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "da_nomi": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "istituti_visti": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "disaccordi": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "detto_dal_modello": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Il valore che il modello aveva emesso finche' glielo si chiedeva. Conservato per poter misurare il disaccordo, mai usato."
+            }
+          }
+        }
+      }
+    },
+    "eccezioni": {
+      "type": "array",
+      "maxItems": 90,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "eccezione_id",
+          "famiglia_probabile",
+          "testo_letterale",
+          "testo_verbatim",
+          "specificita",
+          "conteggi_allegati",
+          "posizione_dichiarata",
+          "ancora"
+        ],
+        "properties": {
+          "eccezione_id": {
+            "type": "string",
+            "pattern": "^X[0-9]{2}$",
+            "description": "Assegnato da Python in ordine di apparizione - chiave referenziale usata da Fase 2 e Fase 3, MAI emessa dal modello."
+          },
+          "famiglia_probabile": {
+            "enum": [
+              "incompletezza_estratti_conto",
+              "saldaconto_art_50_tub",
+              "legittimazione_cessionario",
+              "anomalie_contabili",
+              "vizi_fideiussione",
+              "qualificazione_consumatore",
+              "prescrizione",
+              "documentazione_art_119_tub",
+              "recesso_apertura_credito_senza_preavviso",
+              "competenza_e_rito",
+              "mediazione_procedibilita",
+              "contestazione_ctu",
+              "forma_scritta_art_117_tub",
+              "taeg_isc_indeterminatezza",
+              "ammortamento_alla_francese",
+              "garanzia_ipotecaria",
+              "cambiale_titolo_esecutivo",
+              "segnalazione_centrale_rischi",
+              "decadenza_beneficio_termine",
+              "leasing",
+              "non_riconosciuta"
+            ],
+            "description": "Famiglia probabile scelta dal modello fra le nove note piu' 'non_riconosciuta'. Enum chiuso dal contratto 1.6: prima era stringa libera, e sulla corsa reale del 2026-08-20 il modello ne ha emesse 10 VUOTE su 10 - inutili sia alla classificazione sia al passo 1-bis, che usa la famiglia per indicizzare la descrizione giuridica con cui riformula la query di ricerca (una stringa libera non trova la chiave e la riformulazione degrada senza dirlo). 'non_riconosciuta' e' il valore di FUGA e va usato davvero: il modello non deve scegliere una famiglia a caso pur di riempire il campo. QUESTO CAMPO E' UN SUGGERIMENTO, NON LA CLASSIFICAZIONE: quella definitiva la fa classificazione.py in Fase 2 (euristica per keyword su questo campo PIU' il testo letterale) e puo' sovrascriverlo. Il principio resta quello dell'architettura - il modello estrae, Python decide - e l'enum serve a rendere il suggerimento utilizzabile, non a delegare."
+          },
+          "testo_letterale": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "description": "[LLM] cio' che il modello dichiara di aver citato dall'atto. Dal contratto 1.25 NON e' un campo citabile: l'ancoraggio per similarita' accetta fino a SOGLIA_ANCORATA (0.95), quindi questa stringa puo' differire dalla fonte pur risultando 'ancorata' - misurato su corsa reale (2026-08-26): similarita' 0.9937 con caratteri di scaffolding del modello a entrambi gli estremi. Per citare si usa testo_verbatim."
+          },
+          "testo_verbatim": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "La fetta [inizio:fine] del testo dell'atto agli offset dichiarati dall'ancora, calcolata da Python: e' l'UNICO campo citabile (regola 4). 1.28: nessun `maxLength`. Il tetto vale per cio' che emette il MODELLO - `testo_letterale` ce l'ha, e giustamente - non per cio' che calcola Python: una fetta troncata non e' piu' la fetta a quegli offset, e il campo smetterebbe di essere citabile pur continuando a sembrarlo. Il tetto precedente (4000) faceva fallire in validazione la corsa INTERA, a Fase 1 gia' spesa. Una lunghezza anomala viene DICHIARATA fra i buchi, non tagliata."
+          },
+          "specificita": {
+            "enum": [
+              "specifica",
+              "generica",
+              "non_desumibile"
+            ],
+            "description": "'specifica' quando l'eccezione individua a quali poste, clausole o periodi si riferisce; 'generica' quando contesta senza indicarli. 'non_desumibile' NON e' un terzo giudizio: significa che la domanda a nessuno e' stata posta - e' il valore delle eccezioni che ha trovato la sola spazzata, dove non c'e' stata nessuna chiamata al modello su questo campo. La grammatica della chiamata resta binaria APPOSTA: cio' che il modello risponde e cio' che nessuno ha chiesto sono due cose diverse, e confonderle renderebbe il valore inservibile alle regole che ci girano sopra. Dalla 1.36; prima l'unione scriveva 'specifica' su tutto, e 'specifica' e' il valore che fa dire a quattordici regole su venti che l'eccezione regge."
+          },
+          "conteggi_allegati": {
+            "type": "boolean"
+          },
+          "posizione_dichiarata": {
+            "type": "string",
+            "maxLength": 100,
+            "description": "[LLM] posizione dichiarata dal modello - NON verificata: per la posizione vera usare 'ancora'."
+          },
+          "ancora": {
+            "description": "Calcolata da Python con la procedura di localizzazione definita in CONTRATTI_DATI.md (sezione 'Localizzazione della citazione') - la procedura, le soglie e la mappa degli offset sono PARTE DEL CONTRATTO, non un dettaglio implementativo. Quattro esiti: solo 'ancorata' produce triple automatiche e estratti F01 citabili (con testo = atto_originale[inizio:fine], MAI la stringa emessa dal modello); ancora_ambigua/ancora_parziale/non_ancorata generano una voce in 'buchi' e richiedono revisione - la Fase 2 tratta comunque l'eccezione (la classificazione non dipende dall'ancora).",
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "stato",
+                  "blocco_id",
+                  "inizio",
+                  "fine",
+                  "corrispondenza",
+                  "similarita"
+                ],
+                "properties": {
+                  "stato": {
+                    "const": "ancorata"
+                  },
+                  "blocco_id": {
+                    "type": "string",
+                    "pattern": "^B[0-9]{2}$"
+                  },
+                  "inizio": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "description": "offset nel testo INTERO dell'atto (non nel blocco), SEMPRE riferito al testo originale, mai a quello normalizzato"
+                  },
+                  "fine": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0
+                  },
+                  "corrispondenza": {
+                    "enum": [
+                      "esatta",
+                      "normalizzata",
+                      "fuzzy"
+                    ]
+                  },
+                  "similarita": {
+                    "type": [
+                      "number",
+                      "null"
+                    ],
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "valorizzata solo per corrispondenza=fuzzy (>= 0.95 per contratto), null altrimenti"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "stato",
+                  "occorrenze"
+                ],
+                "properties": {
+                  "stato": {
+                    "const": "ancora_ambigua",
+                    "description": "la citazione compare in PIU' punti dell'atto (match esatti/normalizzati multipli, o piu' finestre fuzzy con similarita' entro 0.02 dalla migliore): mai il primo match d'ufficio - tutte le occorrenze registrate, la scelta e' umana"
+                  },
+                  "occorrenze": {
+                    "type": "array",
+                    "minItems": 2,
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": false,
+                      "required": [
+                        "blocco_id",
+                        "inizio",
+                        "fine"
+                      ],
+                      "properties": {
+                        "blocco_id": {
+                          "type": "string",
+                          "pattern": "^B[0-9]{2}$"
+                        },
+                        "inizio": {
+                          "type": "integer",
+                          "minimum": 0
+                        },
+                        "fine": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "stato",
+                  "migliore_candidato",
+                  "similarita",
+                  "motivo"
+                ],
+                "properties": {
+                  "stato": {
+                    "const": "ancora_parziale",
+                    "description": "migliore finestra fuzzy con 0.80 <= similarita' < 0.95: probabile troncamento o leggera parafrasi del modello - candidato registrato per la revisione, NON citabile automaticamente"
+                  },
+                  "migliore_candidato": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "blocco_id",
+                      "inizio",
+                      "fine"
+                    ],
+                    "properties": {
+                      "blocco_id": {
+                        "type": "string",
+                        "pattern": "^B[0-9]{2}$"
+                      },
+                      "inizio": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "fine": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0
+                      }
+                    }
+                  },
+                  "similarita": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "motivo": {
+                    "type": "string"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "stato",
+                  "motivo"
+                ],
+                "properties": {
+                  "stato": {
+                    "const": "non_ancorata",
+                    "description": "nessuna finestra sopra 0.80"
+                  },
+                  "motivo": {
+                    "type": "string"
+                  }
+                }
+              }
+            ]
+          },
+          "trovata_da": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 2,
+            "uniqueItems": true,
+            "items": {
+              "enum": [
+                "fase1",
+                "spazzata"
+              ]
+            },
+            "description": "1.33 - quale metodo ha trovato questa eccezione. Presente solo quando l'unione e' attiva. Non e' un dettaglio di provenienza: senza di esso un'eccezione della spazzata sarebbe indistinguibile da una di Fase 1, e non ci sarebbe modo di accorgersi che uno dei due metodi e' peggiorato senza rifare da capo tutto il confronto. Due elementi significa che i due hanno prodotto la STESSA fetta carattere per carattere - misurato il segnale di qualita' piu' forte disponibile: 10 su 12 stanno in piedi da sole (83%)."
+          },
+          "motivo_della_scelta": {
+            "enum": [
+              "unica_nella_zona",
+              "concordi",
+              "citabile",
+              "ripiego_la_piu_lunga"
+            ],
+            "description": "1.33 - perche' questa fetta e' passata a valle invece delle altre che si sovrappongono a lei. `ripiego_la_piu_lunga` va letto come un avviso: in quella zona NESSUNA fetta ha superato il controllo di citabilita', e 'la piu' lunga vince' e' l'euristica gia' bocciata (§7.36, concordava 19 su 19 col giudizio umano senza significare niente, perche' l'annotatore vincente era anche sistematicamente piu' lungo). Qui e' un ripiego dichiarato."
+          }
+        }
+      },
+      "description": "1.33 - tetto alzato da 60 a 90. Il 60 era tarato su un metodo solo; con l'unione le voci a valle misurate su sei atti vanno da 26 a 43, quindi 60 lascerebbe meno margine di quanto ne lasciasse prima a Fase 1 da sola. NON e' un allentamento del controllo: superare il tetto continua ad abortire la corsa senza scartare niente, perche' un array che tocca il suo maxItems puo' aver perso materiale al taglio della grammatica - e' il tetto che segue il metodo, non il contrario."
+    },
+    "documenti": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dichiarati_prodotti_da_controparte",
+        "contestati_come_mancanti"
+      ],
+      "properties": {
+        "dichiarati_prodotti_da_controparte": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        },
+        "contestati_come_mancanti": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 200
+          }
+        }
+      }
+    },
+    "domande_riconvenzionali": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 300
+      }
+    },
+    "citazioni_controparte": {
+      "description": "[LLM] Cosi' come scritte nell'atto, non normalizzate (la normalizzazione resta compito di references.py a valle).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "norme",
+        "precedenti"
+      ],
+      "properties": {
+        "norme": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "testo",
+              "data_rilevante"
+            ],
+            "properties": {
+              "testo": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 150
+              },
+              "data_rilevante": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                "description": "[LLM] Data del fatto/contratto/atto rispetto alla quale la controparte invoca la norma - SOLO se il testo la dichiara esplicitamente, MAI dedotta (istruzione di prompt: 'null se l'atto non la indica'). La grammatica impone solo la FORMA della data: validita' di calendario e presenza effettiva nel testo sono controlli Python/revisione. Nullable nel contratto 1.2 (grafo mono-versione); alla migrazione al grafo versionato resta nullable (il modello puo' legittimamente non trovarla) ma diventa il primo criterio della catena di risoluzione temporale in Fase 2."
+              }
+            }
+          }
+        },
+        "precedenti": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 150
+          }
+        }
+      }
+    },
+    "autoverifica": {
+      "description": "[LLM] null se la passata e' fallita o disattivata - dichiarato in 'buchi'.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "eccezioni_confermate",
+        "eccezioni_mancanti_nella_prima_estrazione"
+      ],
+      "properties": {
+        "eccezioni_confermate": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 300
+          }
+        },
+        "eccezioni_mancanti_nella_prima_estrazione": {
+          "type": "array",
+          "description": "Dalla 1.13: oggetti {testo, blocco_origine}, non piu' stringhe con un prefisso '[blocco N] ' concatenato. Il prefisso era metadato travestito da contenuto: aggiunto da Python DOPO che la generazione vincolata da schema aveva gia' portato 'testo' al proprio maxLength, poteva far superare lo stesso limite in validazione finale su un campo che in generazione l'aveva rispettato. Separare i due campi fa si' che il vincolo di generazione e quello di validazione finale misurino la STESSA cosa.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "testo",
+              "blocco_origine"
+            ],
+            "properties": {
+              "testo": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "blocco_origine": {
+                "type": "integer",
+                "minimum": 1,
+                "description": "Indice (1-based) del blocco segmentato da cui proviene questa voce - metadato di Python, mai emesso dal modello."
+              }
+            }
+          }
+        }
+      }
+    },
+    "unita_scartate": {
+      "type": "array",
+      "description": "Dalla 1.14, vocabolario 'non_ancorata' dalla 1.15, criterio per TIPO di affermazione (non per chi parla) dalla 1.17: frammenti estratti come possibili eccezioni ma scartati - prima che il testo esista davvero nell'atto (non_ancorata, controllo 18), poi perche' non sono eccezioni/difese autonome (tesi altrui riportate, rinvii, formule di rito) - MAI persi silenziosamente, cosi' si puo' verificare che i controlli non stiano buttando materiale buono. Sempre presente, anche vuoto.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "testo",
+          "motivo",
+          "blocco_origine",
+          "dettaglio"
+        ],
+        "properties": {
+          "testo": {
+            "type": "string",
+            "maxLength": 4000
+          },
+          "motivo": {
+            "type": "string",
+            "enum": [
+              "non_ancorata",
+              "rinvio_o_richiamo",
+              "formula_di_rito",
+              "tesi_avversa_riportata",
+              "norma_o_giurisprudenza_citata"
+            ]
+          },
+          "blocco_origine": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "dettaglio": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Il motivo di localizza.py quando motivo='non_ancorata' (es. 'nessuna finestra con similarita' >= 0.80'); null per gli altri motivi, che vengono dal filtro semantico e non da un fallimento di ancoraggio."
+          }
+        }
+      }
+    },
+    "buchi": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tipo",
+          "testo"
+        ],
+        "properties": {
+          "tipo": {
+            "enum": [
+              "non_estraibile_dichiarato",
+              "passaggio_fallito",
+              "autoverifica_anomala",
+              "unita_scartata_ancoraggio",
+              "unita_scartata_filtro",
+              "tetto_array",
+              "citazione_senza_data",
+              "citazione_data_non_valida",
+              "duplicato_assorbito",
+              "ancoraggio_non_riuscito",
+              "verbatim_anomalo",
+              "passaggio_recuperato"
+            ],
+            "description": "[PYTHON] Provenienza della voce, vocabolario CHIUSO (estrazione_atto.TIPI_BUCO). Introdotto in 1.24: prima ogni voce era una stringa con un prefisso in italiano fra parentesi quadre, e isolare una classe richiedeva un match testuale sul prefisso (confronta_batch.py lo faceva davvero). Nessun valore 'altro': un tipo fuori vocabolario e' un errore di programmazione, non un dato. `verbatim_anomalo` aggiunto in 1.30: il codice lo emetteva gia' da prima e il contratto non lo conosceva, quindi Fase 1 falliva in validazione a fine corsa su un atto su cinque. `passaggio_recuperato` aggiunto in 1.34: una risposta troncata non vale piu' zero. Il prefisso gia' chiuso viene salvato e l'elenco di quel passaggio e' dichiarato TAGLIATO - e' un terzo esito fra riuscito e fallito, e confonderlo con uno dei due nasconde una cosa diversa in ciascun verso."
+          },
+          "testo": {
+            "type": "string",
+            "description": "[PYTHON] La voce leggibile, invariata rispetto a 1.23 (prefisso incluso): la memoria di analisi la mostra cosi' com'e'. Il tipo si aggiunge al testo, non lo sostituisce."
+          }
+        }
+      },
+      "description": "elementi_non_estraibili aggregati da tutte le passate + una voce esplicita per ogni passata fallita (RispostaTroncata) + una voce per ogni eccezione con ancora non 'ancorata' (non_ancorata, ancora_ambigua, ancora_parziale) + una voce per ogni unita' scartata dal filtro pre-classificazione. Sempre presente, anche vuoto - la Fase 2 lo ricopia in testa alla memoria di analisi. Dal contratto 1.24 ogni voce e' un oggetto {tipo, testo} invece di una stringa nuda."
+    }
+  }
+}
