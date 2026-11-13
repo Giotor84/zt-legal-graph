@@ -1,0 +1,42 @@
+# Fase 1, passata "struttura" - equivalente GBNF di SCHEMA_STRUTTURA
+# (estrazione_atto.py). Chiavi in ordine FISSO: meno gradi di liberta' per
+# il modello, stesso comportamento del convertitore json_schema di
+# llama.cpp (che ordina le proprieta' required nell'ordine di dichiarazione).
+#
+# ws limitato a {0,2}: whitespace illimitato e' esso stesso un possibile
+# loop degenere, stesso fenomeno gia' visto dal vivo su
+# elementi_non_estraibili (vedi nota in estrazione_atto.py).
+#
+# Richiede llama.cpp con supporto repetition {m,n} (presente da meta' 2024).
+
+root ::= "{" ws
+  "\"tipo_atto\"" ws ":" ws tipo-atto ws "," ws
+  "\"fase_processuale\"" ws ":" ws fase-processuale ws "," ws
+  "\"natura_rapporto\"" ws ":" ws natura-rapporto ws "," ws
+  "\"durata_apertura_credito\"" ws ":" ws durata ws "," ws
+  "\"qualita_parti\"" ws ":" ws qualita-parti ws "," ws
+  "\"creditore_e_cessionario\"" ws ":" ws bool ws "," ws
+  "\"elementi_non_estraibili\"" ws ":" ws lista-str-150-max10 ws
+"}"
+
+tipo-atto ::= "\"opposizione_decreto_ingiuntivo\"" | "\"opposizione_esecuzione\"" | "\"comparsa_risposta\"" | "\"memoria\"" | "\"non_desumibile\""
+fase-processuale ::= "\"monitoria\"" | "\"opposizione_cognizione\"" | "\"esecutiva\"" | "\"non_desumibile\""
+natura-rapporto ::= "\"conto_corrente\"" | "\"apertura_credito_cc\"" | "\"mutuo\"" | "\"finanziamento_rateale\"" | "\"altro\"" | "\"non_desumibile\""
+durata ::= "\"tempo_determinato\"" | "\"tempo_indeterminato\"" | "\"non_desumibile\"" | "\"non_applicabile\""
+
+qualita-parti ::= "{" ws
+  "\"debitore_principale\"" ws ":" ws debitore ws "," ws
+  "\"fideiussore_presente\"" ws ":" ws bool ws "," ws
+  "\"qualita_fideiussore\"" ws ":" ws qualita-fideiussore ws "," ws
+  "\"consumatore_eccepito\"" ws ":" ws bool ws
+"}"
+
+debitore ::= "\"persona_fisica\"" | "\"societa\"" | "\"non_desumibile\""
+qualita-fideiussore ::= "\"socio\"" | "\"amministratore\"" | "\"terzo_estraneo\"" | "\"consumatore\"" | "\"non_desumibile\"" | "\"non_applicabile\""
+
+lista-str-150-max10 ::= "[" ws "]" | "[" ws str-150 (ws "," ws str-150){0,9} ws "]"
+str-150 ::= "\"" char{1,150} "\""
+
+bool ::= "true" | "false"
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+ws ::= [ \t\n\r]{0,2}

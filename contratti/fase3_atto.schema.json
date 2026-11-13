@@ -1,0 +1,743 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "fase3_atto.schema.json",
+  "title": "Contratto uscita Fase 3: atto strutturato con ancoraggio per affermazione",
+  "description": "Assemblato da Python a partire da N chiamate LLM (una per esito 'confutabile' + una per la sezione FATTO). Il payload della SINGOLA chiamata e' $defs/confutazione_generata - la GBNF fase3_confutazione.gbnf corrisponde a QUEL payload e va generata a runtime (l'enum delle ancore dipende dal dossier). La bozza .txt depositabile e' un RENDERING deterministico di questo file, non un output separato del modello.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "meta",
+    "fatto",
+    "motivi",
+    "coerenza",
+    "conclusioni",
+    "affermazioni"
+  ],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "versione_contratto",
+        "generato_il",
+        "sha256_dossier",
+        "verifica_post_generazione_superata",
+        "esecuzione"
+      ],
+      "properties": {
+        "versione_contratto": {
+          "const": "1.36"
+        },
+        "generato_il": {
+          "type": "string"
+        },
+        "sha256_dossier": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "verifica_post_generazione_superata": {
+          "type": "boolean",
+          "description": "Esito del doppio binario (verifica_risposta + extract_citations sul testo renderizzato): false = il file esiste ma NON e' pronto per la rifinitura, i problemi sono elencati nella memoria di analisi."
+        },
+        "esecuzione": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Tutto cio' che serve a RIESEGUIRE identicamente questa corsa. Senza questi campi due esecuzioni non sono confrontabili e un golden set non misura niente: una differenza nell'output potrebbe venire dal modello, dal seed, dal contesto, dal corpus o dal codice, e non ci sarebbe modo di dirlo. Blocco identico nei tre schemi di file - la coerenza fra le copie e' verificata da validazione.py.",
+          "required": [
+            "avviata_il",
+            "cache_prompt",
+            "grafo",
+            "id_esecuzione",
+            "modello",
+            "motore_similarita",
+            "n_ctx",
+            "seed",
+            "server",
+            "sha256_atto_input",
+            "soglia_segmenti",
+            "temperature_per_passo",
+            "versione_contratti"
+          ],
+          "properties": {
+            "id_esecuzione": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Identificativo della corsa, IDENTICO nei tre file prodotti dalla stessa esecuzione - e' cio' che permette di legare 01/02/03 fra loro anche dopo che sono stati spostati in cartelle diverse."
+            },
+            "avviata_il": {
+              "type": "string",
+              "description": "Istante di avvio della CORSA (non di scrittura del singolo file): uguale nei tre file, a differenza di meta.generato_il."
+            },
+            "versione_contratti": {
+              "type": "string",
+              "description": "Versione dei contratti sotto cui la corsa e' stata eseguita."
+            },
+            "sha256_atto_input": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "sha256 del TESTO dell'atto su cui si e' lavorato (dopo l'estrazione dal PDF e la pulizia dei numeri di pagina: e' quello a cui gli offset si riferiscono), non del PDF. null nelle corse che ripartono da un file intermedio senza l'atto originale."
+            },
+            "modello": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "description": "null nei file prodotti senza alcuna chiamata LLM (il dossier di Fase 2, che e' solo Python).",
+              "required": [
+                "nome_file",
+                "sha256"
+              ],
+              "properties": {
+                "nome_file": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$",
+                  "description": "sha256 del GGUF. Calcolato una volta e messo in cache in un file .sha256 accanto al modello: su un file da 5 GB ricalcolarlo a ogni corsa costerebbe minuti per un dato che cambia solo quando si cambia modello. null se il file non e' raggiungibile da questa macchina (es. server remoto)."
+                }
+              }
+            },
+            "motore_similarita": {
+              "type": "string",
+              "enum": [
+                "rapidfuzz",
+                "difflib"
+              ],
+              "description": "Quale implementazione ha calcolato i rapporti di similarita' in localizza.py per QUESTA corsa - 'rapidfuzz' se il pacchetto e' installato, altrimenti il fallback 'difflib' (SequenceMatcher, autojunk=False). Le soglie 0.95/0.80 del contratto sono valori assoluti tarati su numeri prodotti da un motore specifico: senza questo campo, un ancoraggio non e' riproducibile ne' confrontabile fra macchine con dipendenze diverse. Vedi test_motori_di_similarita_concordano_su_citazioni_reali per la tolleranza misurata fra i due."
+            },
+            "server": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "Parametri del SERVER llama-server in ascolto per questa corsa, non solo del modello che ospita - dalla 1.12, dopo una non-riproducibilita' di Fase 1 misurata su seed nominalmente identico (causa reale: il seed non arrivava al modello, vedi 'seed' - ma la configurazione del server e' un fattore di riproducibilita' a se', e null finche' non veniva letta da /props non lo dimostrava innocente, lo dava per scontato).",
+              "required": [
+                "total_slots",
+                "build_info"
+              ],
+              "properties": {
+                "total_slots": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "description": "Numero di slot paralleli del server (-np). La configurazione di riferimento (DEPLOY.md) e' 1: su macchina mono-utente il determinismo vale piu' del throughput. null se /props non era raggiungibile."
+                },
+                "build_info": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "description": "Build e commit di llama-server (es. 'b10488-9d77fa172'), da /props. null se /props non era raggiungibile."
+                }
+              }
+            },
+            "cache_prompt": {
+              "type": "boolean",
+              "const": false,
+              "description": "Dalla 1.17: false su OGNI chiamata (llama_server_client.completa), non una scelta per-corsa. Misurato dal vivo che il default true del server e' la causa di un residuo di stato fra richieste sullo stesso processo - stesso prompt, stesso seed, tre chiamate di fila NON davano lo stesso risultato; con cache_prompt esplicito a false, identiche byte per byte. Registrato qui perche' e' esattamente il tipo di parametro la cui assenza renderebbe una corsa non riproducibile con certezza - vedi DEPLOY.md."
+            },
+            "n_ctx": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1,
+              "description": "Contesto REALE del server, letto da /props - non la costante scritta nello script di avvio, che potrebbe non corrispondere all'istanza effettivamente in ascolto."
+            },
+            "seed": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "Seed passato a ogni chiamata. Senza un seed fissato due corse non sono riproducibili nemmeno a parita' di tutto il resto - percio' l'entry point ne impone sempre uno e lo registra qui."
+            },
+            "temperature_per_passo": {
+              "type": "object",
+              "description": "Temperatura per ciascun passo che ha chiamato il modello. Non un valore unico: l'estrazione asettica di Fase 1 gira a 0.1, la redazione a 0.7, la coerenza a 0.3 - riassumerli in un numero solo renderebbe il campo inutile alla riproduzione.",
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "grafo": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": false,
+              "description": "Identita' del corpus usato. null quando la corsa non ha toccato il grafo (Fase 1 da sola, modalita' batch del golden set).",
+              "required": [
+                "percorso",
+                "sha256",
+                "n_nodi"
+              ],
+              "properties": {
+                "percorso": {
+                  "type": "string"
+                },
+                "sha256": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "pattern": "^[0-9a-f]{64}$"
+                },
+                "n_nodi": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 0
+                }
+              }
+            },
+            "soglia_segmenti": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Soglia di rilevanza assoluta applicata all'indice dei segmenti in QUESTA corsa. Parametro, non costante: configurabile da --soglia-segmenti. Registrata qui perche' due corse con soglie diverse producono dossier diversi a parita' di tutto il resto, e senza questo campo la differenza sarebbe inspiegabile. null nelle corse che non hanno interrogato l'indice segmenti (Fase 1 da sola)."
+            }
+          }
+        }
+      }
+    },
+    "fatto": {
+      "description": "Sezione FATTO: paragrafi ancorati a F00 (fatti di causa) e/o F01 (atto di controparte) - anche il fatto ha ancore risolvibili, non solo il diritto. Dalla 1.11: l'astensione e' un esito di prima classe anche qui, non piu' un guasto fatale - stessa forma di una voce di 'motivi', ristretta a tre stati (il FATTO non ha un motore di regole a monte che possa dichiararlo 'fondato' o deciderne l'astensione prima della chiamata: puo' solo essere scritto, astenuto dal modello, o fallito tecnicamente).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "esito",
+        "paragrafi",
+        "dichiarazione_astensione",
+        "motivo_errore"
+      ],
+      "properties": {
+        "esito": {
+          "enum": [
+            "trattata",
+            "astensione_modello",
+            "errore_tecnico"
+          ]
+        },
+        "paragrafi": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/paragrafo_ancorato"
+          }
+        },
+        "dichiarazione_astensione": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Perche' il modello non ha scritto il FATTO, quando il sistema ha funzionato. Mai usato per riferire un guasto."
+        },
+        "motivo_errore": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Cosa si e' rotto generando il FATTO (chiamata troncata, JSON non parsabile). Presente se e solo se esito = errore_tecnico."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "esito": {
+                "const": "trattata"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "paragrafi": {
+                "minItems": 1
+              },
+              "dichiarazione_astensione": {
+                "const": null
+              },
+              "motivo_errore": {
+                "const": null
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "esito": {
+                "const": "astensione_modello"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "paragrafi": {
+                "maxItems": 0
+              },
+              "dichiarazione_astensione": {
+                "type": "string",
+                "minLength": 1
+              },
+              "motivo_errore": {
+                "const": null
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "esito": {
+                "const": "errore_tecnico"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "paragrafi": {
+                "maxItems": 0
+              },
+              "dichiarazione_astensione": {
+                "const": null
+              },
+              "motivo_errore": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "motivi": {
+      "description": "Una voce per OGNI esito del dossier, stesso ordine - le astensioni compaiono qui come voci ESPLICITE, mai come omissioni. astensione_dossier = decisa a monte dalla Fase 2 (nessuna chiamata LLM fatta); astensione_modello = il modello ha scelto il ramo 'astensione' della grammatica; eccezione_fondata = il motore sconsiglia la confutazione; errore_tecnico = la generazione di QUESTO motivo si e' guastata (chiamata troncata, JSON non parsabile, esito di dossier gia' in errore) - il motivo compare nel file come guasto, MAI come astensione: il modello non ha scelto di astenersi, e' stato interrotto. Vedi la nota su astensione/errore_tecnico in fase2_dossier.schema.json - vale identica qui, ed e' la ragione per cui questo enum ha un quinto valore invece di riusarne uno esistente.",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dichiarazione_astensione",
+          "eccezione_id",
+          "eccezioni_accorpate",
+          "esito",
+          "motivo_errore",
+          "paragrafi"
+        ],
+        "properties": {
+          "eccezione_id": {
+            "type": "string",
+            "pattern": "^X[0-9]{2}$"
+          },
+          "esito": {
+            "enum": [
+              "trattata",
+              "astensione_modello",
+              "astensione_dossier",
+              "eccezione_fondata",
+              "errore_tecnico"
+            ]
+          },
+          "paragrafi": {
+            "type": "array",
+            "items": {
+              "$ref": "#/$defs/paragrafo_ancorato"
+            }
+          },
+          "dichiarazione_astensione": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Perche' non si argomenta, quando il sistema ha funzionato. Mai usato per riferire un guasto."
+          },
+          "motivo_errore": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Cosa si e' rotto generando questo motivo, in forma utilizzabile da chi deve rilanciare (quale passo, quale budget, quanti caratteri parziali scartati). Presente se e solo se esito = errore_tecnico."
+          },
+          "eccezioni_accorpate": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^X[0-9]{2}$"
+            },
+            "description": "Rispecchia esiti[].eccezioni_accorpate del dossier, stesso ordine. Un motivo accorpato risponde a piu' eccezioni con un solo argomento."
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "esito": {
+                  "const": "trattata"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "paragrafi": {
+                  "minItems": 1
+                },
+                "dichiarazione_astensione": {
+                  "const": null
+                },
+                "motivo_errore": {
+                  "const": null
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "esito": {
+                  "enum": [
+                    "astensione_modello",
+                    "astensione_dossier",
+                    "eccezione_fondata"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "paragrafi": {
+                  "maxItems": 0
+                },
+                "dichiarazione_astensione": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "motivo_errore": {
+                  "const": null
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "esito": {
+                  "const": "errore_tecnico"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "paragrafi": {
+                  "maxItems": 0
+                },
+                "dichiarazione_astensione": {
+                  "const": null
+                },
+                "motivo_errore": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    "coerenza": {
+      "description": "Esito della passata di coerenza d'insieme (Fase 3-bis, vedi coerenza.schema.json e coerenza.gbnf). null = passata non eseguita (meno di 2 motivi) - dichiarato nella memoria, mai silenzioso. I motivi in questo file restano nell'ordine del dossier: ordine_motivi e' l'ordine di RENDERING applicato da Python alla bozza .txt. Dal contratto 1.27 quell'ordine lo CALCOLA Python per rango processuale (ordine_motivi.py) e non lo chiede piu' al modello: e' sempre una permutazione esatta, e `applicata` riguarda ormai la sola ricerca dei conflitti. I conflitti sono SEGNALATI qui e in testa alla memoria di analisi, mai risolti automaticamente: nessun testo riscritto, nessuna ancora toccata.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": false,
+      "required": [
+        "applicata",
+        "ordine_motivi",
+        "origine_ordine",
+        "conflitti",
+        "copertura_conflitti",
+        "nota"
+      ],
+      "properties": {
+        "applicata": {
+          "type": "boolean",
+          "description": "1.27: false se NESSUNA finestra della ricerca conflitti ha prodotto un risultato utilizzabile (tutte troncate o tutte respinte dal controllo 11). L'ordine resta comunque quello calcolato da Python: non dipende dal modello e non puo' fallire."
+        },
+        "ordine_motivi": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^X[0-9]{2}$"
+          }
+        },
+        "origine_ordine": {
+          "enum": [
+            "python_rango_processuale"
+          ],
+          "description": "Da dove viene l'ordine. Un enum a un valore solo, non un campo inutile: dice a chi legge il file che quell'ordine non e' stato generato, e il giorno in cui una seconda origine esistesse il file lo direbbe invece di lasciarlo indovinare."
+        },
+        "conflitti": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/conflitto"
+          }
+        },
+        "copertura_conflitti": {
+          "type": "object",
+          "description": "Quanto della ricerca conflitti e' stata davvero fatta. La passata gira a finestre scorrevoli: due motivi mai finiti nella stessa finestra NON sono stati confrontati, e l'assenza di segnalazione su quella coppia non e' un'assoluzione. Senza questo blocco quella distinzione andrebbe persa, che e' il silenzio che il contratto vieta.",
+          "additionalProperties": false,
+          "required": [
+            "finestre",
+            "finestre_riuscite",
+            "coppie_esaminate",
+            "coppie_totali"
+          ],
+          "properties": {
+            "finestre": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "finestre_riuscite": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "coppie_esaminate": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "coppie_totali": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "nota": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "conclusioni": {
+      "description": "Richieste al giudice: formule, non affermazioni di diritto - esenti dall'obbligo di ancora, ma l'origine DEVE essere dichiarata e non puo' essere il modello a testo libero. Il testo arriva da fase2_dossier.json/conclusioni_avvocato, copiato tale e quale: la Fase 3 non lo genera e non lo riscrive.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "testo",
+        "origine"
+      ],
+      "properties": {
+        "testo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "origine": {
+          "enum": [
+            "template",
+            "avvocato"
+          ],
+          "description": "OGGI SEMPRE 'avvocato': nel progetto non esiste alcun template di conclusioni, e il testo e' un argomento obbligatorio della riga di comando dell'entry point. Il valore 'template' resta previsto dall'enum ma INUTILIZZATO - introdurre un template significa scrivere formule processuali per conto dell'avvocato, che e' una decisione giuridica e non una comodita' implementativa: richiede un bump di contratto e una fonte dichiarata per quelle formule, non una costante piantata nel codice."
+        }
+      }
+    },
+    "affermazioni": {
+      "description": "Tabella risolta da Python: per OGNI ancora di OGNI paragrafo (fatto + motivi), la tripla (fonte_id, inizio, fine) promessa dal contratto, piu' il node_id per il ricontrollo nel grafo. E' ridondante rispetto a paragrafi+dossier per costruzione - e' il punto: si valida l'una contro gli altri (doppio binario sui dati, non solo sul testo).",
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "paragrafo_id",
+          "estratto_id",
+          "fonte_id",
+          "node_id",
+          "inizio",
+          "fine",
+          "data_vigenza"
+        ],
+        "properties": {
+          "paragrafo_id": {
+            "type": "string",
+            "pattern": "^(FATTO|X[0-9]{2})P[0-9]{2}$"
+          },
+          "estratto_id": {
+            "type": "string",
+            "pattern": "^F[0-9]{2}E[0-9]{2}$"
+          },
+          "fonte_id": {
+            "type": "string",
+            "pattern": "^F[0-9]{2}$"
+          },
+          "node_id": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "inizio": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "fine": {
+            "type": "integer",
+            "exclusiveMinimum": 0
+          },
+          "data_vigenza": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+            "description": "Copiata da Python dalla fonte del dossier: la tripla diventa (fonte@versione, inizio, fine). null finche' il grafo e' mono-versione. Il MODELLO non la tocca mai - nessun impatto su fase3_confutazione.gbnf: estratto_id gia' identifica una versione precisa."
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "conflitto": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tra",
+        "tipo",
+        "descrizione"
+      ],
+      "properties": {
+        "tra": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "string",
+            "pattern": "^X[0-9]{2}$"
+          }
+        },
+        "tipo": {
+          "enum": [
+            "contraddizione",
+            "subordinazione",
+            "sovrapposizione"
+          ]
+        },
+        "descrizione": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300
+        }
+      }
+    },
+    "paragrafo_ancorato": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "paragrafo_id",
+        "testo",
+        "ancore"
+      ],
+      "properties": {
+        "paragrafo_id": {
+          "type": "string",
+          "pattern": "^(FATTO|X[0-9]{2})P[0-9]{2}$",
+          "description": "assegnato da Python, non emesso dal modello"
+        },
+        "testo": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1500
+        },
+        "ancore": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^F[0-9]{2}E[0-9]{2}$"
+          }
+        }
+      }
+    },
+    "confutazione_generata": {
+      "description": "Payload della SINGOLA chiamata LLM (una per eccezione con stato 'confutabile'; stessa forma per la sezione FATTO, con ancore ristrette a F00/F01). A RUNTIME 'items' di 'ancore' va sostituito con un enum degli estratti_citabili di QUELLA eccezione - e' il lucchetto: il motore GBNF non puo' produrre un id fuori dal dossier, per costruzione. Usa SOLO parole chiave che il convertitore json_schema->GBNF di llama.cpp supporta davvero (oneOf, const, enum, minItems/maxItems, minLength/maxLength): uniqueItems e if/then verrebbero IGNORATI in silenzio dal convertitore, quindi qui non compaiono - sono controlli Python.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "esito",
+            "paragrafi"
+          ],
+          "properties": {
+            "esito": {
+              "const": "trattata"
+            },
+            "paragrafi": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 6,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "testo",
+                  "ancore"
+                ],
+                "properties": {
+                  "testo": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1500
+                  },
+                  "ancore": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 4,
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "SEGNAPOSTO_RUNTIME_estratti_citabili"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "esito",
+            "dichiarazione"
+          ],
+          "properties": {
+            "esito": {
+              "const": "astensione"
+            },
+            "dichiarazione": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 600
+            }
+          }
+        }
+      ]
+    }
+  }
+}

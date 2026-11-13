@@ -1,0 +1,41 @@
+# Fase 3-bis - passata di coerenza d'insieme (una chiamata sola, sui
+# riassunti dei motivi gia' prodotti - vedi coerenza.schema.json).
+#
+# TEMPLATE: la regola `motivo-id` va GENERATA A RUNTIME dagli eccezione_id
+# presenti nell'input (stesso meccanismo di ancora-id in
+# fase3_confutazione.gbnf).
+#
+# Cosa la grammatica NON puo' imporre (controlli Python):
+# - ordine_motivi = PERMUTAZIONE esatta degli id in input (ogni id una e
+#   una sola volta): esprimerlo in GBNF richiederebbe enumerare n!
+#   sequenze. La grammatica garantisce solo "lista di id validi".
+# - tra[0] != tra[1] in un conflitto.
+# Output non conforme -> ordine del dossier mantenuto,
+# coerenza.applicata=false, voce esplicita in memoria.
+
+root ::= "{" ws
+  "\"ordine_motivi\"" ws ":" ws ordine ws "," ws
+  "\"conflitti\"" ws ":" ws conflitti ws
+"}"
+
+ordine ::= "[" ws motivo-id (ws "," ws motivo-id){0,14} ws "]"
+
+conflitti ::= "[" ws "]" | "[" ws conflitto (ws "," ws conflitto){0,9} ws "]"
+
+conflitto ::= "{" ws
+  "\"tra\"" ws ":" ws "[" ws motivo-id ws "," ws motivo-id ws "]" ws "," ws
+  "\"tipo\"" ws ":" ws tipo-conflitto ws "," ws
+  "\"descrizione\"" ws ":" ws str-300 ws
+"}"
+
+tipo-conflitto ::= "\"contraddizione\"" | "\"subordinazione\"" | "\"sovrapposizione\""
+
+# ============================================================
+# SEGNAPOSTO - GENERARE A RUNTIME dagli eccezione_id dell'input:
+# motivo-id ::= "\"X01\"" | "\"X02\"" | "\"X03\""
+# ============================================================
+motivo-id ::= "\"X01\"" | "\"X02\"" | "\"X03\""
+
+str-300 ::= "\"" char{1,300} "\""
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+ws ::= [ \t\n\r]{0,2}

@@ -1,0 +1,58 @@
+# Dipendenze della pipeline di confutazione - versioni PINNATE.
+#
+# Generato da `pip freeze` del venv zt_legal_graph_ml (2026-08-20, Python 3.12.10)
+# e ripulito: elencate solo le dipendenze DIRETTE del progetto piu' quelle
+# transitive che vale la pena bloccare perche' un loro cambio sposterebbe i
+# numeri (torch, transformers, tokenizers: cambiano gli embedding).
+#
+# Il resto delle transitive lo risolve pip. Non e' pigrizia: bloccare 57
+# pacchetti significa che il prossimo aggiornamento di sicurezza di
+# `certifi` fa fallire l'installazione, e l'unica cosa che davvero deve
+# restare identica sono i vettori.
+#
+# ---------------------------------------------------------------------
+# ATTENZIONE, DUE COSE CHE IL FREEZE NON DICE
+# ---------------------------------------------------------------------
+#
+# 1. torch qui e' la build CPU (torch==2.13.0+cpu sul PC attuale). Sulla
+#    macchina con GPU va installata la build CUDA, che NON si ottiene da
+#    questo file: usare l'indice CUDA di PyTorch (download.pytorch.org/whl/cuXXX). Installare
+#    prima questo requirements e poi sovrascrivere torch e' la sequenza
+#    giusta, non un ripiego.
+#
+# 2. rapidfuzz e pytest vanno SEMPRE nel venv, mai nel Python di sistema -
+#    su una macchina precedente pytest girava in un interprete e la
+#    pipeline in un altro, e nessuno se n'era accorto.
+#    - rapidfuzz: OBBLIGATORIO (contratto 1.10), non un'ottimizzazione di
+#      velocita'. E' il motore di RIFERIMENTO su cui sono tarate le soglie
+#      0.95/0.80 di ancoraggio. Senza, localizza.py ricade su difflib
+#      (autojunk=False), che non e' lo stesso algoritmo (Ratcliff/Obershelp
+#      contro Indel/LCS) e puo' dare un punteggio diverso sulla STESSA
+#      finestra - misurato 0.0072 su una citazione reale, abbastanza per
+#      ribaltare uno stato di ancoraggio vicino a soglia. Oltre a essere
+#      ~50 volte piu' lento (e su un atto lungo la Fase 1 ne risente),
+#      NON e' equivalente: se manca, esegui_pipeline.main() avvisa
+#      esplicitamente e la corsa registra "difflib" in
+#      meta.esecuzione.motore_similarita.
+#    - pytest: la suite non gira senza.
+
+# --- usati direttamente dal codice del progetto
+jsonschema~=4.26
+networkx~=3.6
+numpy==2.5.1
+pdfplumber==0.11.10
+rapidfuzz==3.14.5
+requests~=2.34
+sentence-transformers==5.7.0
+
+# --- transitive da bloccare: determinano i VETTORI, e quindi la soglia
+# 0.8560 calibrata su quei vettori. Un cambio di versione qui e' un
+# cambio di numeri, non un aggiornamento.
+torch==2.13.0
+transformers==5.14.1
+tokenizers==0.22.2
+safetensors==0.8.0
+huggingface-hub==1.26.1
+
+# --- test
+pytest>=8

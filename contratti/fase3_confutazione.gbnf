@@ -1,0 +1,54 @@
+# Fase 3 - grammatica della SINGOLA chiamata (una per eccezione con stato
+# "confutabile" nel dossier; stessa forma per la sezione FATTO, con
+# ancora-id ristretto agli estratti di F00/F01).
+#
+# QUESTO FILE E' UN TEMPLATE, non usabile cosi' com'e': la regola
+# `ancora-id` va GENERATA A RUNTIME dagli estratti_citabili di QUELLA
+# eccezione (vedi CONTRATTI_DATI.md per il generatore). E' il lucchetto
+# del contratto: il motore GBNF non puo' fisicamente emettere un id fuori
+# dal dossier - la Fase 3 scrive SOLO su fonti gia' verificate a monte,
+# per costruzione, non per disciplina.
+#
+# Due rami alternativi, strutturalmente esclusivi:
+# - "trattata": 1-6 paragrafi, OGNUNO con almeno 1 ancora (minItems e'
+#   nella struttura stessa: un paragrafo senza ancora non e' generabile).
+# - "astensione": il modello puo' dichiarare che gli estratti disponibili
+#   non sostengono l'argomento - l'astensione e' un esito di prima classe,
+#   non un fallimento. (L'astensione decisa a monte dalla Fase 2 non passa
+#   di qui: per quegli esiti la chiamata LLM non viene proprio fatta.)
+#
+# paragrafo_id NON e' emesso dal modello - lo assegna Python assemblando
+# fase3_atto.json.
+
+root ::= trattata | astensione
+
+trattata ::= "{" ws
+  "\"esito\"" ws ":" ws "\"trattata\"" ws "," ws
+  "\"paragrafi\"" ws ":" ws paragrafi ws
+"}"
+
+astensione ::= "{" ws
+  "\"esito\"" ws ":" ws "\"astensione\"" ws "," ws
+  "\"dichiarazione\"" ws ":" ws str-600 ws
+"}"
+
+paragrafi ::= "[" ws paragrafo (ws "," ws paragrafo){0,5} ws "]"
+
+paragrafo ::= "{" ws
+  "\"testo\"" ws ":" ws str-1500 ws "," ws
+  "\"ancore\"" ws ":" ws ancore ws
+"}"
+
+# almeno 1, massimo 4 - mai vuoto per costruzione
+ancore ::= "[" ws ancora-id (ws "," ws ancora-id){0,3} ws "]"
+
+# ============================================================
+# SEGNAPOSTO - GENERARE A RUNTIME dal dossier, esempio:
+# ancora-id ::= "\"F02E01\"" | "\"F02E02\"" | "\"F03E01\""
+# ============================================================
+ancora-id ::= "\"F02E01\"" | "\"F02E02\"" | "\"F03E01\""
+
+str-1500 ::= "\"" char{1,1500} "\""
+str-600 ::= "\"" char{1,600} "\""
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+ws ::= [ \t\n\r]{0,2}

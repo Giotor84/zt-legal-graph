@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "eventi.schema.json",
+  "title": "Una riga dello stream di avanzamento di una corsa (eventi.jsonl)",
+  "description": "Canale separato dal log testuale (Registro.dice), pensato per essere letto da un front end senza fare parsing di prosa italiana. Ogni riga di eventi.jsonl DEVE validare contro questo schema. Versionato indipendentemente da fase1/fase2/fase3 (non e' un contratto di CATENA fra fasi: non viene mai riletto da _controlla_versione, non alimenta la fase successiva, esiste solo per l'osservabilita' di UNA corsa) - vedi CONTRATTI_DATI.md, sezione sul perche' non e' nel gruppo dei tre schemi bloccati sulla stessa versione.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_versione", "ts", "tipo", "fase", "passo", "indice", "totale", "messaggio"],
+  "properties": {
+    "schema_versione": {
+      "const": "1.0",
+      "description": "Versione di QUESTO schema, non di fase1/fase2/fase3 - un front end deve poter leggere eventi.jsonl anche di corse fatte con una versione diversa dei tre contratti di file, purche' lo schema_versione degli eventi non sia cambiato."
+    },
+    "ts": {
+      "type": "string",
+      "description": "UTC, isoformat con millisecondi (es. 2026-08-25T18:03:11.482+00:00)."
+    },
+    "tipo": {
+      "enum": ["corsa_avviata", "passo_avviato", "passo_concluso", "chiamata_llm", "nota", "fine"],
+      "description": "corsa_avviata: prima riga, contesto di esecuzione. passo_avviato/passo_concluso: bracket di un passo nominato di Registro.passo() (granularita' di fase, es. 'fase1_estrazione'). chiamata_llm: avanzamento DENTRO un passo, una riga per chiamata al modello (granularita' di chiamata, es. blocco/motivo/unita' del filtro). nota: equivalente strutturato di Registro.nota() (avvisi, controlli graduati, buchi dichiarati). fine: ULTIMA riga della corsa, sempre scritta in un finally - vedi 'esito'."
+    },
+    "fase": {
+      "type": ["string", "null"],
+      "enum": [null, "fase1", "fase2", "fase3", "fase3bis", "verifica_post_generazione"],
+      "description": "Granularita' grossa (corrisponde ai raggruppamenti dell'orchestratore, non ai singoli Registro.passo()). null per corsa_avviata/fine e per le note non legate a una fase specifica. La distinzione fine (es. riformulazione vs costruzione dossier, entrambe 'fase2') sta nel campo 'passo'."
+    },
+    "passo": {
+      "type": ["string", "null"],
+      "description": "Nome del passo o della chiamata, leggibile da un umano (es. 'fase1_blocco_03_eccezioni', 'fase1_blocco_03_filtro_unita', 'fase3_motivo_X07', 'fase3_fatto'). Non e' un enum chiuso: i nomi nascono dal loop che li genera (blocchi, esiti, unita' del filtro), un enum li dovrebbe elencare tutti in anticipo - impossibile per costruzione data la Nota 1 di CONTRATTI_DATI.md sul fan-out dinamico del filtro di Fase 1."
+    },
+    "indice": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Per tipo=chiamata_llm: contatore 1-based delle chiamate LLM fatte finora NELLA FASE corrente (mai azzerato per sotto-passo, cosi' un blocco che ne genera 6 e uno che ne genera 2 restano sulla stessa barra di avanzamento). Per gli altri tipi, null."
+    },
+    "totale": {
+      "type": ["integer", "null"],
+      "minimum": 0,
+      "description": "Chiamate LLM attese nella fase corrente, SE calcolabile in anticipo (fase3: n. esiti confutabili + 1 per il FATTO; riformulazione: n. eccezioni) - altrimenti esplicitamente null, MAI la chiave assente. Fase 1 e' SEMPRE null: il filtro pre-classificazione fa una chiamata per unita' superstite, un numero che si scopre blocco per blocco, non prima di iniziare (vedi 'passo'). Un fronte end onesto mostra 'chiamata 3' quando totale e' null, non '3 di ?' inventato ne' una barra percentuale fasulla."
+    },
+    "messaggio": {
+      "type": "string",
+      "description": "Testo leggibile, stesso contenuto che andrebbe su Registro.dice/nota - MAI l'unica fonte di un dato strutturato (fase/passo/indice/totale coprono quello), solo il dettaglio qualitativo."
+    },
+    "esito": {
+      "description": "Presente SOLO su tipo=='fine' (vedi allOf sotto, che lo rende obbligatorio li' e vietato altrove). Dichiarato qui in cima, non solo dentro allOf, perche' additionalProperties:false valuta le chiavi ammesse a QUESTO livello - una chiave nota solo dentro un ramo if/then non basterebbe a farla accettare.",
+      "enum": ["ok", "astensione", "errore", "interrotta"]
+    },
+    "codice_uscita": {
+      "description": "Presente SOLO su tipo=='fine'. Uno dei codici di uscita di esegui_pipeline.py (0/1/2/3/4), o null se non ancora determinato al momento del finally.",
+      "type": ["integer", "null"]
+    },
+    "traceback": {
+      "description": "Presente SOLO su tipo=='fine'. Popolato SOLO per esito=='errore' su un'eccezione non prevista (il ramo 'noqa: BLE001' di main()); null per ogni altro caso, incluso 'errore' su ErroreTecnico/ContrattoViolato, dove il messaggio e' gia' l'informazione utile.",
+      "type": ["string", "null"]
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "tipo": { "const": "fine" } }, "required": ["tipo"] },
+      "then": {
+        "required": ["esito", "codice_uscita", "traceback"],
+        "properties": {
+          "esito": {
+            "description": "'astensione' (uscita 2) e' un esito di prima classe, non un errore - collassarlo su 'errore' violerebbe il principio 'astensione != guasto' che vale per l'intera pipeline (CONTRATTI_DATI.md). 'interrotta' e' scritta SOLO se il processo Python ha potuto eseguire il proprio finally (KeyboardInterrupt gestito) - un processo terminato a forza (taskkill /F, crash nativo) non scrive MAI questa riga: la sua ASSENZA, non un valore, e' il segnale che il front end deve interpretare come 'interrotta con la forza'."
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "esito": false,
+          "codice_uscita": false,
+          "traceback": false
+        }
+      }
+    }
+  ]
+}

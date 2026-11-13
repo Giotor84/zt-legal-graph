@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+data/
+dati/
+atti_input/
+runs/
+out_*/
+lavoro/
+*.gpickle
+*.npy
+*.log
+.scan-allow

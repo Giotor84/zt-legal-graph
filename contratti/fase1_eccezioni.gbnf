@@ -1,0 +1,52 @@
+# Fase 1, passata "eccezioni" - equivalente GBNF di SCHEMA_ECCEZIONI
+# (estrazione_atto.py). Il modello emette SOLO questi campi: eccezione_id
+# e ancora (offset) sono assegnati/calcolati da Python a valle, mai
+# generati (un modello ~3B attivi non sa calcolare offset: li
+# inventerebbe, e la grammatica non potrebbe accorgersene).
+#
+# I limiti {m,n} replicano maxItems/maxLength dello schema - fix
+# strutturale contro il loop degenere osservato dal vivo (2026-08-19).
+
+root ::= "{" ws
+  "\"eccezioni_sollevate\"" ws ":" ws eccezioni ws "," ws
+  "\"documenti_dichiarati_prodotti_da_controparte\"" ws ":" ws lista-str-200-max15 ws "," ws
+  "\"documenti_contestati_come_mancanti\"" ws ":" ws lista-str-200-max15 ws "," ws
+  "\"domande_riconvenzionali\"" ws ":" ws lista-str-300-max10 ws "," ws
+  "\"elementi_non_estraibili\"" ws ":" ws lista-str-150-max10 ws
+"}"
+
+eccezioni ::= "[" ws "]" | "[" ws eccezione (ws "," ws eccezione){0,14} ws "]"
+
+eccezione ::= "{" ws
+  "\"famiglia_probabile\"" ws ":" ws famiglia ws "," ws
+  "\"testo_letterale\"" ws ":" ws str-4000 ws "," ws
+  # Binaria APPOSTA, anche se dalla 1.36 lo schema ammette un terzo
+  # valore: `non_desumibile` significa "la domanda a nessuno e' stata
+  # posta", e lo scrive Python sulle voci della sola spazzata. Cio'
+  # che il modello risponde e cio' che nessuno ha chiesto sono due
+  # cose diverse; darle lo stesso nome renderebbe il campo inservibile
+  # alle quattordici regole che ci girano sopra.
+  "\"specificita\"" ws ":" ws ("\"specifica\"" | "\"generica\"") ws "," ws
+  "\"conteggi_allegati\"" ws ":" ws bool ws "," ws
+  "\"posizione_nel_documento\"" ws ":" ws str-100 ws
+"}"
+
+# Enum chiuso, copiato dallo schema (contratto 1.36): venti famiglie
+# piu' il valore di fuga. Era fermo alle nove della 1.6, e questo file
+# dichiara di essere l'equivalente di SCHEMA_ECCEZIONI: una
+# divergenza silenziosa fra i due si legge come una regola.
+famiglia ::= "\"incompletezza_estratti_conto\"" | "\"saldaconto_art_50_tub\"" | "\"legittimazione_cessionario\"" | "\"anomalie_contabili\"" | "\"vizi_fideiussione\"" | "\"qualificazione_consumatore\"" | "\"prescrizione\"" | "\"documentazione_art_119_tub\"" | "\"recesso_apertura_credito_senza_preavviso\"" | "\"competenza_e_rito\"" | "\"mediazione_procedibilita\"" | "\"contestazione_ctu\"" | "\"forma_scritta_art_117_tub\"" | "\"taeg_isc_indeterminatezza\"" | "\"ammortamento_alla_francese\"" | "\"garanzia_ipotecaria\"" | "\"cambiale_titolo_esecutivo\"" | "\"segnalazione_centrale_rischi\"" | "\"decadenza_beneficio_termine\"" | "\"leasing\"" | "\"non_riconosciuta\""
+
+lista-str-150-max10 ::= "[" ws "]" | "[" ws str-150 (ws "," ws str-150){0,9} ws "]"
+lista-str-200-max15 ::= "[" ws "]" | "[" ws str-200 (ws "," ws str-200){0,14} ws "]"
+lista-str-300-max10 ::= "[" ws "]" | "[" ws str-300 (ws "," ws str-300){0,9} ws "]"
+
+str-100 ::= "\"" char{1,100} "\""
+str-150 ::= "\"" char{1,150} "\""
+str-200 ::= "\"" char{1,200} "\""
+str-300 ::= "\"" char{1,300} "\""
+str-4000 ::= "\"" char{1,4000} "\""
+
+bool ::= "true" | "false"
+char ::= [^"\\\x7F\x00-\x1F] | [\\] (["\\bfnrt] | "u" [0-9a-fA-F]{4})
+ws ::= [ \t\n\r]{0,2}
